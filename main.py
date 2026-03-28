@@ -38,9 +38,24 @@ def state():
 def list_tasks():
     return {
         "tasks": [
-            {"id": "easy", "name": "Syntax repair", "difficulty": "easy"},
-            {"id": "medium", "name": "Join logic fix", "difficulty": "medium"},
-            {"id": "hard", "name": "Performance optimization", "difficulty": "hard"},
+            {
+                "id": "easy",
+                "name": "Syntax repair",
+                "difficulty": "easy",
+                "action_schema": Action.model_json_schema(),
+            },
+            {
+                "id": "medium",
+                "name": "Join logic fix",
+                "difficulty": "medium",
+                "action_schema": Action.model_json_schema(),
+            },
+            {
+                "id": "hard",
+                "name": "Performance optimization",
+                "difficulty": "hard",
+                "action_schema": Action.model_json_schema(),
+            },
         ]
     }
 
