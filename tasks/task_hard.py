@@ -19,9 +19,14 @@ def create_db():
     try:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
+
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=10000")
+
         conn.execute("DROP TABLE IF EXISTS sales")
         conn.execute("DROP TABLE IF EXISTS products")
+
         conn.execute(
             """
             CREATE TABLE products (
@@ -31,6 +36,7 @@ def create_db():
             )
         """
         )
+
         conn.execute(
             """
             CREATE TABLE sales (
@@ -41,23 +47,24 @@ def create_db():
             )
         """
         )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sales_product
-            ON sales(product_id)
-        """
-        )
+
+        # 50 products
         products = [
             (f"Product_{i}", "Cat_A" if i % 2 == 0 else "Cat_B") for i in range(1, 51)
         ]
-        sales = [((i % 50) + 1, float(i * 10), "2024-01-01") for i in range(1, 1001)]
         conn.executemany("INSERT INTO products(name, category) VALUES (?,?)", products)
+
+        # 100,000 sales rows — makes correlated subquery slow
+        sales = [((i % 50) + 1, float(i * 10), "2024-01-01") for i in range(1, 100001)]
         conn.executemany(
             "INSERT INTO sales(product_id, amount, sale_date) VALUES (?,?,?)", sales
         )
+
+
         conn.commit()
         conn.close()
-        logger.info("analytics.db created ok")
+        logger.info("analytics.db created ok with 100k rows")
+
     except Exception as e:
         logger.error(f"create_db failed: {e}")
         raise
@@ -65,6 +72,7 @@ def create_db():
 
 def get_task() -> TaskInfo:
     create_db()
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.execute(
         """
@@ -91,8 +99,7 @@ WHERE (SELECT COUNT(*)
        FROM sales s3
        WHERE s3.product_id = p.id) > 5
 ORDER BY p.name""",
-        schema_sql="""
-CREATE TABLE products (
+        schema_sql="""CREATE TABLE products (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     name     TEXT    NOT NULL UNIQUE,
     category TEXT    NOT NULL
@@ -102,7 +109,8 @@ CREATE TABLE sales (
     product_id INTEGER NOT NULL REFERENCES products(id),
     amount     REAL    NOT NULL CHECK(amount > 0),
     sale_date  TEXT    NOT NULL
-);""".strip(),
+);
+CREATE INDEX idx_sales_product ON sales(product_id);""",
         expected_output=expected,
         db_path=DB_PATH,
     )
