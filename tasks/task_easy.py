@@ -2,6 +2,7 @@ import sqlite3
 import os
 import sys
 import logging
+import random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import TaskInfo
@@ -12,6 +13,35 @@ DB_PATH = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..", "databases", "employees.db"
 ))
+
+# Multiple broken query scenarios
+EASY_SCENARIOS = [
+    {
+        "name": "typo_from",
+        "broken": "SELECT name, salary FORM employees WHERE department = 'Engineering' ORDER BY name",
+        "description": "FORM instead of FROM typo"
+    },
+    {
+        "name": "typo_where",
+        "broken": "SELECT name, salary FROM employees WERE department = 'Engineering' ORDER BY name",
+        "description": "WERE instead of WHERE typo"
+    },
+    {
+        "name": "typo_select",
+        "broken": "SELCT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name",
+        "description": "SELCT instead of SELECT typo"
+    },
+    {
+        "name": "wrong_column",
+        "broken": "SELECT name, wages FROM employees WHERE department = 'Engineering' ORDER BY name",
+        "description": "wages instead of salary - wrong column name"
+    },
+    {
+        "name": "missing_quotes",
+        "broken": "SELECT name, salary FROM employees WHERE department = Engineering ORDER BY name",
+        "description": "missing quotes around Engineering"
+    },
+]
 
 
 def create_db():
@@ -52,8 +82,19 @@ def create_db():
         raise
 
 
-def get_task() -> TaskInfo:
+def get_task(scenario_name: str = None) -> TaskInfo:
     create_db()
+
+    # Pick scenario
+    if scenario_name:
+        scenario = next(
+            (s for s in EASY_SCENARIOS if s["name"] == scenario_name),
+            EASY_SCENARIOS[0]
+        )
+    else:
+        scenario = random.choice(EASY_SCENARIOS)
+
+    # Get correct expected output from DB
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.execute(
         "SELECT name, salary FROM employees "
@@ -66,17 +107,14 @@ def get_task() -> TaskInfo:
 
     return TaskInfo(
         task_id="easy",
-        broken_query=(
-            "SELECT name, salary FORM employees "
-            "WHERE department = 'Engineering' ORDER BY name"
-        ),
-        schema_sql="""
-CREATE TABLE employees (
+        broken_query=scenario["broken"],
+        schema_sql="""CREATE TABLE employees (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT    NOT NULL,
     salary     REAL    NOT NULL CHECK(salary > 0),
     department TEXT    NOT NULL
-);""".strip(),
+);
+CREATE INDEX idx_dept ON employees(department);""",
         expected_output=expected,
         db_path=DB_PATH
     )
