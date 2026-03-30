@@ -71,3 +71,30 @@ def grader():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+@app.get("/baseline")
+def baseline():
+    try:
+        results = {}
+        for task_id in ["easy", "medium", "hard"]:
+            obs = env.reset(task_id)
+            done = False
+            total_reward = 0.0
+            steps = 0
+            while not done and steps < 10:
+                from tasks.task_easy import get_task
+                task = env.current_task
+                if task_id == "easy":
+                    from tasks.task_easy import get_task as gt
+                elif task_id == "medium":
+                    from tasks.task_medium import get_task as gt
+                else:
+                    from tasks.task_hard import get_task as gt
+                t = gt()
+                action = Action(type="execute_query", sql=t.broken_query)
+                obs, reward, done, info = env.step(action)
+                total_reward = reward.cumulative_reward
+                steps += 1
+            results[task_id] = round(total_reward, 3)
+        return {"status": "ok", "scores": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
