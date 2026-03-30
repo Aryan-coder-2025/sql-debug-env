@@ -90,7 +90,7 @@ def baseline():
                 else:
                     from tasks.task_hard import get_task as gt
                 t = gt()
-                action = Action(type="execute_query", sql=t.broken_query)
+                action = Action(type="fix_query", sql=t.broken_query)
                 obs, reward, done, info = env.step(action)
                 total_reward = reward.cumulative_reward
                 steps += 1
