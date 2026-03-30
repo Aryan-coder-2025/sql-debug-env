@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -6,10 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-
-RUN python -c "from tasks.task_easy import create_db; create_db()"
-RUN python -c "from tasks.task_medium import create_db; create_db()"
-RUN python -c "from tasks.task_hard import create_db; create_db()"
 
 EXPOSE 7860
 
