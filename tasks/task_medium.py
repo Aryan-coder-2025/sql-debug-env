@@ -2,17 +2,94 @@ import sqlite3
 import os
 import sys
 import logging
+import random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import TaskInfo
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.normpath(
-    os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "databases", "ecommerce.db"
-    )
-)
+DB_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "databases", "ecommerce.db"
+))
+
+MEDIUM_SCENARIOS = [
+    {
+        "name": "inner_join",
+        "broken": """SELECT
+    c.name              AS customer_name,
+    COUNT(o.id)         AS total_orders,
+    COALESCE(SUM(oi.amount), 0) AS total_spent
+FROM customers c
+INNER JOIN orders o
+    ON c.id = o.customer_id
+INNER JOIN order_items oi
+    ON o.id = oi.order_id
+GROUP BY c.id, c.name
+ORDER BY c.name""",
+        "description": "INNER JOIN loses customers with no orders"
+    },
+    {
+        "name": "wrong_join_condition",
+        "broken": """SELECT
+    c.name              AS customer_name,
+    COUNT(o.id)         AS total_orders,
+    COALESCE(SUM(oi.amount), 0) AS total_spent
+FROM customers c
+LEFT JOIN orders o
+    ON c.name = o.customer_id
+LEFT JOIN order_items oi
+    ON o.id = oi.order_id
+GROUP BY c.id, c.name
+ORDER BY c.name""",
+        "description": "Wrong join condition - comparing name to id"
+    },
+    {
+        "name": "missing_group_by",
+        "broken": """SELECT
+    c.name              AS customer_name,
+    COUNT(o.id)         AS total_orders,
+    COALESCE(SUM(oi.amount), 0) AS total_spent
+FROM customers c
+LEFT JOIN orders o
+    ON c.id = o.customer_id
+LEFT JOIN order_items oi
+    ON o.id = oi.order_id
+ORDER BY c.name""",
+        "description": "Missing GROUP BY causes wrong aggregation"
+    },
+    {
+        "name": "wrong_count_column",
+        "broken": """SELECT
+    c.name              AS customer_name,
+    COUNT(*)            AS total_orders,
+    COALESCE(SUM(oi.amount), 0) AS total_spent
+FROM customers c
+LEFT JOIN orders o
+    ON c.id = o.customer_id
+LEFT JOIN order_items oi
+    ON o.id = oi.order_id
+GROUP BY c.id, c.name
+ORDER BY c.name""",
+        "description": "COUNT(*) counts nulls, COUNT(o.id) does not"
+    },
+    {
+        "name": "missing_coalesce",
+        "broken": """SELECT
+    c.name              AS customer_name,
+    COUNT(o.id)         AS total_orders,
+    SUM(oi.amount)      AS total_spent
+FROM customers c
+LEFT JOIN orders o
+    ON c.id = o.customer_id
+LEFT JOIN order_items oi
+    ON o.id = oi.order_id
+GROUP BY c.id, c.name
+ORDER BY c.name""",
+        "description": "Missing COALESCE causes NULL instead of 0"
+    },
+]
 
 
 def create_db():
@@ -27,40 +104,30 @@ def create_db():
         conn.execute("DROP TABLE IF EXISTS products")
         conn.execute("DROP TABLE IF EXISTS customers")
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE customers (
                 id    INTEGER PRIMARY KEY AUTOINCREMENT,
                 name  TEXT    NOT NULL,
                 email TEXT    NOT NULL UNIQUE,
                 city  TEXT    NOT NULL
             )
-        """
-        )
-
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE TABLE products (
                 id    INTEGER PRIMARY KEY AUTOINCREMENT,
                 name  TEXT    NOT NULL,
                 price REAL    NOT NULL CHECK(price > 0)
             )
-        """
-        )
-
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE TABLE orders (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer_id INTEGER REFERENCES customers(id),
                 order_date  TEXT    NOT NULL DEFAULT (date('now')),
                 status      TEXT    NOT NULL DEFAULT 'pending'
             )
-        """
-        )
-
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE TABLE order_items (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_id   INTEGER NOT NULL REFERENCES orders(id),
@@ -68,40 +135,30 @@ def create_db():
                 quantity   INTEGER NOT NULL CHECK(quantity > 0),
                 amount     REAL    NOT NULL CHECK(amount > 0)
             )
-        """
-        )
+        """)
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_items_product ON order_items(product_id)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id)")
 
         conn.executemany(
             "INSERT INTO customers(name, email, city) VALUES (?,?,?)",
             [
                 ("Alice", "alice@email.com", "Mumbai"),
-                ("Bob", "bob@email.com", "Delhi"),
+                ("Bob",   "bob@email.com",   "Delhi"),
                 ("Carol", "carol@email.com", "Bangalore"),
-                ("Dave", "dave@email.com", "Chennai"),
-                ("Eve", "eve@email.com", "Hyderabad"),
-            ],
+                ("Dave",  "dave@email.com",  "Chennai"),
+                ("Eve",   "eve@email.com",   "Hyderabad"),
+            ]
         )
-
         conn.executemany(
             "INSERT INTO products(name, price) VALUES (?,?)",
             [
                 ("Laptop", 75000.0),
-                ("Phone", 25000.0),
+                ("Phone",  25000.0),
                 ("Tablet", 35000.0),
-                ("Watch", 15000.0),
-            ],
+                ("Watch",  15000.0),
+            ]
         )
-
         conn.executemany(
             "INSERT INTO orders(customer_id, order_date, status) VALUES (?,?,?)",
             [
@@ -110,9 +167,8 @@ def create_db():
                 (2, "2024-01-20", "completed"),
                 (2, "2024-03-05", "pending"),
                 (1, "2024-03-10", "pending"),
-            ],
+            ]
         )
-
         conn.executemany(
             "INSERT INTO order_items(order_id, product_id, quantity, amount) VALUES (?,?,?,?)",
             [
@@ -122,24 +178,29 @@ def create_db():
                 (3, 3, 1, 35000.0),
                 (4, 1, 1, 75000.0),
                 (5, 2, 1, 25000.0),
-            ],
+            ]
         )
-
         conn.commit()
         conn.close()
         logger.info("ecommerce.db created ok")
-
     except Exception as e:
         logger.error(f"create_db failed: {e}")
         raise
 
 
-def get_task() -> TaskInfo:
+def get_task(scenario_name: str = None) -> TaskInfo:
     create_db()
 
+    if scenario_name:
+        scenario = next(
+            (s for s in MEDIUM_SCENARIOS if s["name"] == scenario_name),
+            MEDIUM_SCENARIOS[0]
+        )
+    else:
+        scenario = random.choice(MEDIUM_SCENARIOS)
+
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.execute(
-        """
+    cursor = conn.execute("""
         SELECT
             c.name              AS customer_name,
             COUNT(o.id)         AS total_orders,
@@ -151,25 +212,14 @@ def get_task() -> TaskInfo:
             ON o.id = oi.order_id
         GROUP BY c.id, c.name
         ORDER BY c.name
-    """
-    )
+    """)
     cols = [c[0] for c in cursor.description]
     expected = [dict(zip(cols, row)) for row in cursor.fetchall()]
     conn.close()
 
     return TaskInfo(
         task_id="medium",
-        broken_query="""SELECT
-    c.name              AS customer_name,
-    COUNT(o.id)         AS total_orders,
-    COALESCE(SUM(oi.amount), 0) AS total_spent
-FROM customers c
-INNER JOIN orders o
-    ON c.id = o.customer_id
-INNER JOIN order_items oi
-    ON o.id = oi.order_id
-GROUP BY c.id, c.name
-ORDER BY c.name""",
+        broken_query=scenario["broken"],
         schema_sql="""CREATE TABLE customers (
     id    INTEGER PRIMARY KEY AUTOINCREMENT,
     name  TEXT    NOT NULL,
@@ -195,5 +245,5 @@ CREATE TABLE order_items (
     amount     REAL    NOT NULL CHECK(amount > 0)
 );""",
         expected_output=expected,
-        db_path=DB_PATH,
+        db_path=DB_PATH
     )
