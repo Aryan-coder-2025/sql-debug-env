@@ -226,12 +226,16 @@ class SQLDebugEnv:
             for row in expected
         ]
 
+        # Full credit — exact order match
+        if result_normalized == expected_normalized:
+            return 1.0
+
+        # Partial credit — right rows wrong order (max 0.7)
         matches = sum(
             1 for row in result_normalized
             if row in expected_normalized
         )
-
-        return round(min(1.0, matches / len(expected_normalized)), 4)
+        return round(min(0.7, (matches / len(expected_normalized)) * 0.7), 4)
 
     def _calculate_reward(
         self,
