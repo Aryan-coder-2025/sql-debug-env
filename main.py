@@ -343,6 +343,12 @@ def grader():
 @app.get("/baseline")
 def baseline():
     try:
+        import os
+
+        # When running on HF Space, point to self
+        hf_space_host = os.environ.get("SPACE_HOST", "")
+        if hf_space_host:
+            os.environ["SERVER_URL"] = f"https://{hf_space_host}"
         from baseline.run_baseline import run_all_tasks
 
         return run_all_tasks()
