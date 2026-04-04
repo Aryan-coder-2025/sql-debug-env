@@ -24,7 +24,6 @@ app.add_middleware(
 env = SQLDebugEnv()
 
 
-# ── Request model ──────────────────────────────────────────────
 class ResetRequest(BaseModel):
     task_id: str = "easy"
 
@@ -35,29 +34,46 @@ class ResetRequest(BaseModel):
         return v
 
 
-# ── Global error handlers ──────────────────────────────────────
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
-        status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
+        status_code=500, content={"detail": f"Internal server error: {str(exc)}"}
     )
+
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
-    return JSONResponse(
-        status_code=400,
-        content={"detail": str(exc)}
-    )
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
-# ── FIX 1: "healthy" not "ok" ─────────────────────────────────
+@app.get("/")
+def root():
+    return {
+        "name": "SQL Debug Environment",
+        "version": "1.0.0",
+        "description": "OpenEnv environment for training AI agents to debug SQL queries",
+        "status": "running",
+        "endpoints": {
+            "health": "GET  /health",
+            "reset": "POST /reset",
+            "step": "POST /step",
+            "state": "GET  /state",
+            "tasks": "GET  /tasks",
+            "grader": "GET  /grader",
+            "baseline": "GET  /baseline",
+            "docs": "GET  /docs",
+        },
+        "tasks": ["easy", "medium", "hard"],
+        "hf_space": "https://aryan-coder-25-openenv.hf.space",
+        "hackathon": "OpenEnv by Meta x Hugging Face x Scalar",
+    }
+
+
 @app.get("/health")
 def health():
     return {"status": "healthy", "version": "1.0.0"}
 
 
-# ── FIX 2: /metadata (was missing) ────────────────────────────
 @app.get("/metadata")
 def metadata():
     return {
@@ -72,7 +88,6 @@ def metadata():
     }
 
 
-# ── FIX 3: /schema (was missing) ──────────────────────────────
 @app.get("/schema")
 def schema():
     return {
@@ -82,8 +97,8 @@ def schema():
             "properties": {
                 "type": {"type": "string", "enum": ["run_sql", "fix_query", "analyze"]},
                 "sql": {"type": "string", "maxLength": 10000},
-                "reasoning": {"type": "string", "maxLength": 2000}
-            }
+                "reasoning": {"type": "string", "maxLength": 2000},
+            },
         },
         "observation": {
             "type": "object",
@@ -94,8 +109,8 @@ def schema():
                 "query_result": {"type": ["array", "null"]},
                 "error_message": {"type": ["string", "null"]},
                 "step_count": {"type": "integer"},
-                "done": {"type": "boolean"}
-            }
+                "done": {"type": "boolean"},
+            },
         },
         "state": {
             "type": "object",
@@ -105,40 +120,44 @@ def schema():
                 "max_steps": {"type": "integer"},
                 "cumulative_reward": {"type": "number"},
                 "done": {"type": "boolean"},
-                "history_length": {"type": "integer"}
-            }
-        }
+                "history_length": {"type": "integer"},
+            },
+        },
     }
 
 
-# ── FIX 4: /mcp (was missing) ─────────────────────────────────
 @app.post("/mcp")
 async def mcp(request: Request):
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse(status_code=400, content={
-            "jsonrpc": "2.0",
-            "error": {"code": -32700, "message": "Parse error"},
-            "id": None
-        })
+        return JSONResponse(
+            status_code=400,
+            content={
+                "jsonrpc": "2.0",
+                "error": {"code": -32700, "message": "Parse error"},
+                "id": None,
+            },
+        )
 
     method = body.get("method", "")
     req_id = body.get("id", 1)
 
     if method == "initialize":
         return {
-            "jsonrpc": "2.0", "id": req_id,
+            "jsonrpc": "2.0",
+            "id": req_id,
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "SQL Debug Environment", "version": "1.0.0"}
-            }
+                "serverInfo": {"name": "SQL Debug Environment", "version": "1.0.0"},
+            },
         }
 
     if method == "tools/list":
         return {
-            "jsonrpc": "2.0", "id": req_id,
+            "jsonrpc": "2.0",
+            "id": req_id,
             "result": {
                 "tools": [
                     {
@@ -147,9 +166,12 @@ async def mcp(request: Request):
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "task_id": {"type": "string", "enum": ["easy", "medium", "hard"]}
-                            }
-                        }
+                                "task_id": {
+                                    "type": "string",
+                                    "enum": ["easy", "medium", "hard"],
+                                }
+                            },
+                        },
                     },
                     {
                         "name": "step",
@@ -160,12 +182,12 @@ async def mcp(request: Request):
                             "properties": {
                                 "type": {"type": "string"},
                                 "sql": {"type": "string"},
-                                "reasoning": {"type": "string"}
-                            }
-                        }
-                    }
+                                "reasoning": {"type": "string"},
+                            },
+                        },
+                    },
                 ]
-            }
+            },
         }
 
     if method == "tools/call":
@@ -175,29 +197,54 @@ async def mcp(request: Request):
         if tool_name == "reset":
             try:
                 obs = env.reset(arguments.get("task_id", "easy"))
-                return {"jsonrpc": "2.0", "id": req_id,
-                        "result": {"content": [{"type": "text", "text": str(obs)}]}}
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"content": [{"type": "text", "text": str(obs)}]},
+                }
             except Exception as e:
-                return {"jsonrpc": "2.0", "id": req_id,
-                        "error": {"code": -32000, "message": str(e)}}
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32000, "message": str(e)},
+                }
 
         if tool_name == "step":
             try:
                 action = Action(**arguments)
                 obs, reward, done, info = env.step(action)
-                return {"jsonrpc": "2.0", "id": req_id,
-                        "result": {"content": [{"type": "text", "text": str({
-                            "observation": str(obs), "reward": str(reward), "done": done
-                        })}]}}
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": str(
+                                    {
+                                        "observation": str(obs),
+                                        "reward": str(reward),
+                                        "done": done,
+                                    }
+                                ),
+                            }
+                        ]
+                    },
+                }
             except Exception as e:
-                return {"jsonrpc": "2.0", "id": req_id,
-                        "error": {"code": -32000, "message": str(e)}}
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32000, "message": str(e)},
+                }
 
-    return {"jsonrpc": "2.0", "id": req_id,
-            "error": {"code": -32601, "message": f"Method not found: {method}"}}
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {"code": -32601, "message": f"Method not found: {method}"},
+    }
 
 
-# ── Existing endpoints ─────────────────────────────────────────
 @app.post("/reset")
 def reset(request: ResetRequest):
     try:
@@ -213,13 +260,17 @@ def reset(request: ResetRequest):
 def step(action: Action):
     try:
         if not env.current_task:
-            raise HTTPException(status_code=400, detail="Call /reset first before /step")
+            env.reset("easy")
         if not action.sql or not action.sql.strip():
             return {
                 "observation": {
-                    "task_id": env.current_task.task_id,
-                    "broken_query": env.current_task.broken_query,
-                    "db_schema": env.current_task.schema_sql,
+                    "task_id": env.current_task.task_id if env.current_task else None,
+                    "broken_query": (
+                        env.current_task.broken_query if env.current_task else ""
+                    ),
+                    "db_schema": (
+                        env.current_task.schema_sql if env.current_task else ""
+                    ),
                     "query_result": None,
                     "error_message": "Empty SQL query submitted",
                     "step_count": env.step_count,
@@ -232,7 +283,7 @@ def step(action: Action):
                     "performance": 0.0,
                 },
                 "done": False,
-                "info": {"error": "empty_sql"}
+                "info": {"error": "empty_sql"},
             }
         obs, reward, done, info = env.step(action)
         return {"observation": obs, "reward": reward, "done": done, "info": info}
@@ -260,22 +311,22 @@ def list_tasks():
                 "id": "easy",
                 "name": "Syntax repair",
                 "difficulty": "easy",
-                "description": "Fix a syntax error in a SQL query (e.g. FORM instead of FROM)",
-                "action_schema": Action.model_json_schema()
+                "description": "Fix a syntax error in a SQL query",
+                "action_schema": Action.model_json_schema(),
             },
             {
                 "id": "medium",
                 "name": "Join logic fix",
                 "difficulty": "medium",
-                "description": "Fix wrong JOIN type causing missing rows (INNER vs LEFT JOIN)",
-                "action_schema": Action.model_json_schema()
+                "description": "Fix wrong JOIN type causing missing rows",
+                "action_schema": Action.model_json_schema(),
             },
             {
                 "id": "hard",
                 "name": "Performance optimization",
                 "difficulty": "hard",
-                "description": "Fix correlated subquery logic error AND optimize for speed",
-                "action_schema": Action.model_json_schema()
+                "description": "Fix correlated subquery logic error and optimize for speed",
+                "action_schema": Action.model_json_schema(),
             },
         ]
     }
@@ -293,6 +344,7 @@ def grader():
 def baseline():
     try:
         from baseline.run_baseline import run_all_tasks
+
         return run_all_tasks()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
