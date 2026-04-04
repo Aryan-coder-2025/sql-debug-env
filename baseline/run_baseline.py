@@ -14,22 +14,28 @@ elif OPENAI_API_KEY:
     client = OpenAI(api_key=OPENAI_API_KEY)
     MODEL = "gpt-4o"
 else:
-    raise ValueError("Set GROQ_API_KEY or OPENAI_API_KEY")
+    client = None
+    MODEL = None
 
 SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:7860")
 
 
 def run_task(task_id: str) -> float:
+    if client is None:
+        return {
+            "score": 0.0,
+            "error": "No API key set. Set GROQ_API_KEY or OPENAI_API_KEY.",
+            "task_id": task_id,
+        }
+
     try:
         r = httpx.post(f"{SERVER_URL}/reset", json={"task_id": task_id}, timeout=30)
         if r.status_code != 200:
-            print(f"Reset failed: {r.status_code} {r.text}")
+            print(f"Reset failed: {r.status_code}")
             return 0.0
 
         obs = r.json()
-
         if not obs.get("task_id"):
-            print(f"Reset returned unexpected data: {obs}")
             return 0.0
 
         messages = [
@@ -58,12 +64,23 @@ def run_task(task_id: str) -> float:
         while not done and steps < max_steps:
             steps += 1
 
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=0.1,
-            )
+            # Retry logic for rate limits
+            for attempt in range(3):
+                try:
+                    response = client.chat.completions.create(
+                        model=MODEL,
+                        messages=messages,
+                        response_format={"type": "json_object"},
+                        temperature=0.1,
+                    )
+                    break
+                except Exception as e:
+                    if "rate_limit" in str(e).lower() and attempt < 2:
+                        wait_time = 30 * (attempt + 1)
+                        print(f"Rate limit hit, waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        raise e
 
             action_json = response.choices[0].message.content
             action = json.loads(action_json)
@@ -71,10 +88,10 @@ def run_task(task_id: str) -> float:
             if action.get("type") not in ["run_sql", "fix_query", "analyze"]:
                 action["type"] = "run_sql"
 
-            step_r = httpx.post(f"{SERVER_URL}/step", json=action, timeout=30)
+            step_r = httpx.post(f"{SERVER_URL}/step", json=action, timeout=60)
 
             if step_r.status_code != 200:
-                print(f"Step failed: {step_r.status_code} {step_r.text[:100]}")
+                print(f"Step failed: {step_r.status_code}")
                 break
 
             result = step_r.json()
@@ -121,8 +138,11 @@ def run_all_tasks() -> dict:
     for task_id in ["easy", "medium", "hard"]:
         print(f"Running task: {task_id}...")
         score = run_task(task_id)
-        results[task_id] = round(score, 4)
-        print(f"  Score: {score:.4f}")
+        if isinstance(score, dict):
+            results[task_id] = score
+        else:
+            results[task_id] = round(float(score), 4)
+        print(f"  Score: {results[task_id]}")
     return results
 
 
@@ -138,6 +158,9 @@ if __name__ == "__main__":
     print("Final Baseline Scores")
     print("=" * 40)
     for task, score in scores.items():
-        bar = "█" * int(score * 20)
-        print(f"  {task:<10} : {score:.4f}  {bar}")
+        if isinstance(score, dict):
+            print(f"  {task:<10} : ERROR - {score.get('error')}")
+        else:
+            bar = "█" * int(score * 20)
+            print(f"  {task:<10} : {score:.4f}  {bar}")
     print("=" * 40)
