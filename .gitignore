@@ -23,3 +23,7 @@ Thumbs.db
 databases/*.db
 
 baseline_scores.py
+
+*.db
+*.db-shm
+*.db-wal
