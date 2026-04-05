@@ -1,3 +1,12 @@
+---
+title: Openenv
+emoji: 🛠️
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # 🛠️ SQL Debug Environment
 
 > An OpenEnv-compatible reinforcement learning environment for training AI agents to debug SQL queries — built for the **OpenEnv Hackathon by Meta × Hugging Face × Scalar School of Technology**.
