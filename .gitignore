@@ -1,5 +1,25 @@
+﻿# Virtual environment
+venv/
+
+# Python cache
 __pycache__/
 *.pyc
-venv/
-*.db
+*.pyo
+
+# Local output/scores
+baseline_scores.json
+
+# Environment variables / secrets
 .env
+*.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+*.db-shm
+*.db-wal
+
+databases/*.db
+
+baseline_scores.py
