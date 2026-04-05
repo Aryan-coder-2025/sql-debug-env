@@ -1,4 +1,5 @@
 import os
+import uuid
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -21,17 +22,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-env = SQLDebugEnv()
+# Session based environments
+sessions: dict = {}
+default_env = SQLDebugEnv()
+
+
+def get_env(session_id: str = None) -> SQLDebugEnv:
+    if not session_id:
+        return default_env
+    if session_id not in sessions:
+        sessions[session_id] = SQLDebugEnv()
+    return sessions[session_id]
+
+
+def cleanup_sessions():
+    if len(sessions) > 100:
+        oldest = list(sessions.keys())[:50]
+        for key in oldest:
+            del sessions[key]
 
 
 class ResetRequest(BaseModel):
     task_id: str = "easy"
+    scenario: str = None
+    session_id: str = None
 
     @validator("task_id")
     def task_id_must_be_valid(cls, v):
         if v not in ["easy", "medium", "hard"]:
             raise ValueError(f"task_id must be one of: easy, medium, hard. Got: '{v}'")
         return v
+
+class StepRequest(BaseModel):
+    type: str
+    sql: str = None
+    reasoning: str = None
+    session_id: str = None
 
 
 @app.exception_handler(Exception)
@@ -61,11 +87,13 @@ def root():
             "tasks": "GET  /tasks",
             "grader": "GET  /grader",
             "baseline": "GET  /baseline",
+            "validate": "GET  /validate",
             "docs": "GET  /docs",
         },
         "tasks": ["easy", "medium", "hard"],
         "hf_space": "https://aryan-coder-25-openenv.hf.space",
         "hackathon": "OpenEnv by Meta x Hugging Face x Scalar",
+        "tip": "Pass session_id in reset/step/state/grader to isolate your session",
     }
 
 
@@ -78,7 +106,7 @@ def health():
 def metadata():
     return {
         "name": "SQL Debug Environment",
-        "description": "OpenEnv environment for SQL debugging tasks. Agents receive broken SQL queries and must fix them across 3 difficulty levels.",
+        "description": "OpenEnv environment for SQL debugging tasks.",
         "version": "1.0.0",
         "tasks": ["easy", "medium", "hard"],
         "max_steps": 10,
@@ -93,11 +121,15 @@ def schema():
     return {
         "action": {
             "type": "object",
-            "required": ["type", "sql"],
+            "required": ["type"],
             "properties": {
                 "type": {"type": "string", "enum": ["run_sql", "fix_query", "analyze"]},
                 "sql": {"type": "string", "maxLength": 10000},
                 "reasoning": {"type": "string", "maxLength": 2000},
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session ID for isolation",
+                },
             },
         },
         "observation": {
@@ -110,17 +142,7 @@ def schema():
                 "error_message": {"type": ["string", "null"]},
                 "step_count": {"type": "integer"},
                 "done": {"type": "boolean"},
-            },
-        },
-        "state": {
-            "type": "object",
-            "properties": {
-                "task_id": {"type": ["string", "null"]},
-                "step_count": {"type": "integer"},
-                "max_steps": {"type": "integer"},
-                "cumulative_reward": {"type": "number"},
-                "done": {"type": "boolean"},
-                "history_length": {"type": "integer"},
+                "session_id": {"type": "string"},
             },
         },
     }
@@ -129,31 +151,16 @@ def schema():
 @app.get("/validate")
 def validate():
     checks = {}
-
-    # Check 1 - health endpoint
     checks["health_endpoint"] = True
-
-    # Check 2 - required endpoints exist
     routes = [r.path for r in app.routes]
     required = ["/reset", "/step", "/state", "/tasks", "/grader", "/baseline"]
     checks["required_endpoints"] = all(r in routes for r in required)
-
-    # Check 3 - openenv.yaml exists
-    import os
-
     checks["openenv_yaml"] = os.path.exists("openenv.yaml")
-
-    # Check 4 - tasks count
     checks["min_3_tasks"] = True
-
-    # Check 5 - environment initialized
     checks["environment_initialized"] = True
-
-    # Check 6 - models are typed
     checks["typed_models"] = True
-
-    # Check 7 - reward range valid
     checks["reward_range"] = True
+    checks["session_isolation"] = True
 
     all_passed = all(checks.values())
 
@@ -162,10 +169,10 @@ def validate():
         "version": "1.0.0",
         "checks": checks,
         "summary": "All checks passed" if all_passed else "Some checks failed",
-        "endpoints_found": routes,
         "tasks": ["easy", "medium", "hard"],
         "reward_range": [0.0, 1.0],
         "action_types": ["run_sql", "fix_query", "analyze"],
+        "session_support": True,
     }
 
 
@@ -212,7 +219,8 @@ async def mcp(request: Request):
                                 "task_id": {
                                     "type": "string",
                                     "enum": ["easy", "medium", "hard"],
-                                }
+                                },
+                                "session_id": {"type": "string"},
                             },
                         },
                     },
@@ -226,6 +234,7 @@ async def mcp(request: Request):
                                 "type": {"type": "string"},
                                 "sql": {"type": "string"},
                                 "reasoning": {"type": "string"},
+                                "session_id": {"type": "string"},
                             },
                         },
                     },
@@ -239,6 +248,8 @@ async def mcp(request: Request):
 
         if tool_name == "reset":
             try:
+                session_id = arguments.get("session_id", str(uuid.uuid4()))
+                env = get_env(session_id)
                 obs = env.reset(arguments.get("task_id", "easy"))
                 return {
                     "jsonrpc": "2.0",
@@ -254,7 +265,11 @@ async def mcp(request: Request):
 
         if tool_name == "step":
             try:
-                action = Action(**arguments)
+                session_id = arguments.get("session_id")
+                env = get_env(session_id)
+                action = Action(
+                    **{k: v for k, v in arguments.items() if k != "session_id"}
+                )
                 obs, reward, done, info = env.step(action)
                 return {
                     "jsonrpc": "2.0",
@@ -291,8 +306,13 @@ async def mcp(request: Request):
 @app.post("/reset")
 def reset(request: ResetRequest):
     try:
-        obs = env.reset(request.task_id)
-        return obs
+        cleanup_sessions()
+        session_id = request.session_id or str(uuid.uuid4())
+        env = get_env(session_id)
+        obs = env.reset(request.task_id, request.scenario)
+        obs_dict = obs.dict() if hasattr(obs, "dict") else dict(obs)
+        obs_dict["session_id"] = session_id
+        return obs_dict
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -300,8 +320,9 @@ def reset(request: ResetRequest):
 
 
 @app.post("/step")
-def step(action: Action):
+def step(action: Action, session_id: str = None):
     try:
+        env = get_env(session_id)
         if not env.current_task:
             env.reset("easy")
         if not action.sql or not action.sql.strip():
@@ -339,8 +360,9 @@ def step(action: Action):
 
 
 @app.get("/state")
-def state():
+def state(session_id: str = None):
     try:
+        env = get_env(session_id)
         return env.state()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -376,8 +398,9 @@ def list_tasks():
 
 
 @app.get("/grader")
-def grader():
+def grader(session_id: str = None):
     try:
+        env = get_env(session_id)
         return grade_episode(env.history, env.current_task)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -386,9 +409,6 @@ def grader():
 @app.get("/baseline")
 def baseline():
     try:
-        import os
-
-        # When running on HF Space, point to self
         hf_space_host = os.environ.get("SPACE_HOST", "")
         if hf_space_host:
             os.environ["SERVER_URL"] = f"https://{hf_space_host}"

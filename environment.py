@@ -22,10 +22,10 @@ class SQLDebugEnv:
         self.cumulative_reward: float = 0.0
         self.history: List[Dict[str, Any]] = []
 
-    def reset(self, task_id: str = "easy") -> Observation:
+    def reset(self, task_id: str = "easy", scenario: str = None) -> Observation:
         logger.info(f"Resetting environment for task: {task_id}")
 
-        task = self._load_task(task_id)
+        task = self._load_task(task_id, scenario)
         self.current_task = task
         self.step_count = 0
         self.cumulative_reward = 0.0
@@ -54,15 +54,11 @@ class SQLDebugEnv:
             f"sql={str(action.sql)[:80]}"
         )
 
-        result, error, exec_time = self._execute_query(
-            action.sql, task.db_path
-        )
+        result, error, exec_time = self._execute_query(action.sql, task.db_path)
 
         correctness = self._get_correctness(result, task.expected_output)
         step_reward = self._calculate_reward(result, error, correctness)
-        self.cumulative_reward = round(
-            self.cumulative_reward + step_reward, 4
-        )
+        self.cumulative_reward = round(self.cumulative_reward + step_reward, 4)
 
         done = (self.step_count >= self.max_steps) or (correctness >= 1.0)
 
@@ -83,12 +79,14 @@ class SQLDebugEnv:
             done=done,
         )
 
-        self.history.append({
-            "step": self.step_count,
-            "action": action.model_dump(),
-            "reward": reward.model_dump(),
-            "done": done,
-        })
+        self.history.append(
+            {
+                "step": self.step_count,
+                "action": action.model_dump(),
+                "reward": reward.model_dump(),
+                "done": done,
+            }
+        )
 
         logger.info(
             f"Step {self.step_count} result | "
@@ -101,10 +99,7 @@ class SQLDebugEnv:
 
     def state(self) -> Dict[str, Any]:
         return {
-            "task_id": (
-                self.current_task.task_id
-                if self.current_task else None
-            ),
+            "task_id": (self.current_task.task_id if self.current_task else None),
             "step_count": self.step_count,
             "max_steps": self.max_steps,
             "cumulative_reward": self.cumulative_reward,
@@ -113,9 +108,7 @@ class SQLDebugEnv:
         }
 
     def _execute_query(
-        self,
-        sql: Optional[str],
-        db_path: str
+        self, sql: Optional[str], db_path: str
     ) -> Tuple[Optional[List[Dict]], Optional[str], float]:
 
         start = time.perf_counter()
@@ -137,9 +130,7 @@ class SQLDebugEnv:
         # Run the query safely
         try:
             db_uri = f"file:{db_path}?mode=ro"
-            with sqlite3.connect(
-                db_uri, uri=True, timeout=5
-            ) as conn:
+            with sqlite3.connect(db_uri, uri=True, timeout=5) as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql)
 
@@ -153,8 +144,7 @@ class SQLDebugEnv:
                 exec_time = (time.perf_counter() - start) * 1000
 
                 logger.info(
-                    f"Query returned {len(result)} rows "
-                    f"in {exec_time:.2f}ms"
+                    f"Query returned {len(result)} rows " f"in {exec_time:.2f}ms"
                 )
                 return result, None, exec_time
 
@@ -175,9 +165,15 @@ class SQLDebugEnv:
 
         # Block dangerous starting keywords
         dangerous_starts = [
-            "DROP", "DELETE", "TRUNCATE",
-            "UPDATE", "INSERT", "ALTER",
-            "CREATE", "REPLACE", "ATTACH"
+            "DROP",
+            "DELETE",
+            "TRUNCATE",
+            "UPDATE",
+            "INSERT",
+            "ALTER",
+            "CREATE",
+            "REPLACE",
+            "ATTACH",
         ]
 
         for word in dangerous_starts:
@@ -186,9 +182,13 @@ class SQLDebugEnv:
 
         # Block dangerous patterns anywhere
         dangerous_patterns = [
-            "DROP TABLE", "DROP DATABASE",
-            "DELETE FROM", "TRUNCATE TABLE",
-            "--", "/*", "*/"
+            "DROP TABLE",
+            "DROP DATABASE",
+            "DELETE FROM",
+            "TRUNCATE TABLE",
+            "--",
+            "/*",
+            "*/",
         ]
 
         for pattern in dangerous_patterns:
@@ -203,9 +203,7 @@ class SQLDebugEnv:
         return False, ""
 
     def _get_correctness(
-        self,
-        result: Optional[List[Dict]],
-        expected: List[Dict]
+        self, result: Optional[List[Dict]], expected: List[Dict]
     ) -> float:
 
         if result is None:
@@ -218,12 +216,10 @@ class SQLDebugEnv:
             return 0.0
 
         result_normalized = [
-            tuple(sorted((k, str(v)) for k, v in row.items()))
-            for row in result
+            tuple(sorted((k, str(v)) for k, v in row.items())) for row in result
         ]
         expected_normalized = [
-            tuple(sorted((k, str(v)) for k, v in row.items()))
-            for row in expected
+            tuple(sorted((k, str(v)) for k, v in row.items())) for row in expected
         ]
 
         # Full credit — exact order match
@@ -231,17 +227,11 @@ class SQLDebugEnv:
             return 1.0
 
         # Partial credit — right rows wrong order (max 0.7)
-        matches = sum(
-            1 for row in result_normalized
-            if row in expected_normalized
-        )
+        matches = sum(1 for row in result_normalized if row in expected_normalized)
         return round(min(0.7, (matches / len(expected_normalized)) * 0.7), 4)
 
     def _calculate_reward(
-        self,
-        result: Optional[List[Dict]],
-        error: Optional[str],
-        correctness: float
+        self, result: Optional[List[Dict]], error: Optional[str], correctness: float
     ) -> float:
 
         if error:
@@ -266,21 +256,19 @@ class SQLDebugEnv:
 
         return round(reward, 4)
 
-    def _load_task(self, task_id: str) -> TaskInfo:
+    def _load_task(self, task_id: str, scenario: str = None) -> TaskInfo:
         valid = ["easy", "medium", "hard"]
 
         if task_id not in valid:
-            raise ValueError(
-                f"Unknown task '{task_id}'. Valid: {valid}"
-            )
+            raise ValueError(f"Unknown task '{task_id}'. Valid: {valid}")
 
         if task_id == "easy":
-            from tasks.task_easy import get_task as get_task
+            from tasks.task_easy import get_task
         elif task_id == "medium":
-            from tasks.task_medium import get_task as get_task
+            from tasks.task_medium import get_task
         elif task_id == "hard":
-            from tasks.task_hard import get_task as get_task
+            from tasks.task_hard import get_task
         else:
             raise ValueError(f"Unhandled task_id: {task_id}")
 
-        return get_task()
+        return get_task(scenario)
