@@ -9,9 +9,12 @@ all_passed = True
 
 # Test 1 - Empty SQL
 print("\nTest 1: Empty SQL submission...")
-httpx.post(f"{base}/reset", params={"task_id": "easy"})
+r = httpx.post(f"{base}/reset", json={"task_id": "easy", "scenario": "typo_from"})
+session_id = r.json().get("session_id")
 r = httpx.post(
-    f"{base}/step", json={"type": "run_sql", "sql": "", "reasoning": "empty"}
+    f"{base}/step",
+    params={"session_id": session_id},
+    json={"type": "run_sql", "sql": "", "reasoning": "empty"},
 )
 result = r.json()
 error = result["observation"]["error_message"]
@@ -25,9 +28,11 @@ if not empty_pass:
 
 # Test 2 - Right rows wrong order
 print("\nTest 2: Right rows but wrong ORDER BY...")
-httpx.post(f"{base}/reset", params={"task_id": "easy"})
+r = httpx.post(f"{base}/reset", json={"task_id": "easy", "scenario": "typo_from"})
+session_id = r.json().get("session_id")
 r = httpx.post(
     f"{base}/step",
+    params={"session_id": session_id},
     json={
         "type": "run_sql",
         "sql": "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY salary DESC",
@@ -42,11 +47,13 @@ print(f'  Result: {"PASS - partial credit given" if wrong_order_pass else "FAIL"
 if not wrong_order_pass:
     all_passed = False
 
-# Test 3 - Correct answer gets 1.0
+# Test 3 - Correct answer
 print("\nTest 3: Correct answer gets full score...")
-httpx.post(f"{base}/reset", params={"task_id": "easy"})
+r = httpx.post(f"{base}/reset", json={"task_id": "easy", "scenario": "typo_from"})
+session_id = r.json().get("session_id")
 r = httpx.post(
     f"{base}/step",
+    params={"session_id": session_id},
     json={
         "type": "run_sql",
         "sql": "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name",
@@ -61,11 +68,14 @@ print(f'  Result: {"PASS" if correct_pass else "FAIL"}')
 if not correct_pass:
     all_passed = False
 
-# Test 4 - NULL input
+# Test 4 - NULL SQL
 print("\nTest 4: NULL/None SQL...")
-httpx.post(f"{base}/reset", params={"task_id": "easy"})
+r = httpx.post(f"{base}/reset", json={"task_id": "easy", "scenario": "typo_from"})
+session_id = r.json().get("session_id")
 r = httpx.post(
-    f"{base}/step", json={"type": "run_sql", "sql": "", "reasoning": "null test"}
+    f"{base}/step",
+    params={"session_id": session_id},
+    json={"type": "run_sql", "sql": "", "reasoning": "null test"},
 )
 result = r.json()
 null_pass = result["observation"]["error_message"] is not None
@@ -76,16 +86,18 @@ if not null_pass:
 
 # Test 5 - Grader endpoint
 print("\nTest 5: /grader endpoint after episode...")
-httpx.post(f"{base}/reset", params={"task_id": "easy"})
+r = httpx.post(f"{base}/reset", json={"task_id": "easy", "scenario": "typo_from"})
+session_id = r.json().get("session_id")
 httpx.post(
     f"{base}/step",
+    params={"session_id": session_id},
     json={
         "type": "run_sql",
         "sql": "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name",
         "reasoning": "correct",
     },
 )
-r = httpx.get(f"{base}/grader")
+r = httpx.get(f"{base}/grader", params={"session_id": session_id})
 grader = r.json()
 grader_pass = "score" in grader and grader["score"] > 0
 print(f'  Score: {grader.get("score")}')
