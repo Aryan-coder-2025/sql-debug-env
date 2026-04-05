@@ -16,6 +16,7 @@ DB_PATH = os.path.normpath(
 )
 
 EASY_SCENARIOS = [
+    # ── Original scenarios ──────────────────────────────────────────────────
     {
         "name": "typo_from",
         "broken": "SELECT name, salary FORM employees WHERE department = 'Engineering' ORDER BY name",
@@ -50,6 +51,28 @@ EASY_SCENARIOS = [
         "name": "null_handling",
         "broken": "SELECT name, salary FROM employees WHERE salary = NULL ORDER BY name",
         "description": "= NULL instead of IS NULL returns nothing",
+    },
+    # ── NEW: Aggregation scenarios ───────────────────────────────────────────
+    {
+        "name": "agg_missing_group_by",
+        "broken": "SELECT department, AVG(salary) AS avg_salary FROM employees ORDER BY department",
+        "description": "AVG with no GROUP BY — aggregates entire table instead of per department",
+    },
+    {
+        "name": "agg_count_star_vs_column",
+        "broken": "SELECT department, COUNT(*) AS headcount FROM employees WHERE salary > 80000 GROUP BY department ORDER BY department",
+        "description": "COUNT(*) counts NULLs; should be COUNT(salary) to exclude NULL salaries",
+    },
+    {
+        "name": "agg_having_vs_where",
+        "broken": "SELECT department, AVG(salary) AS avg_salary FROM employees GROUP BY department WHERE AVG(salary) > 88000 ORDER BY department",
+        "description": "WHERE used after GROUP BY instead of HAVING for aggregate filter",
+    },
+    # ── NEW: Index / performance scenario ───────────────────────────────────
+    {
+        "name": "no_index_like",
+        "broken": "SELECT name, salary FROM employees WHERE department LIKE '%ing' ORDER BY name",
+        "description": "LIKE '%ing' matches both Engineering AND Marketing — returns wrong rows, should use = 'Engineering'",
     },
 ]
 
@@ -98,30 +121,45 @@ def create_db():
 
 
 def get_expected_output(conn, scenario_name):
-    if scenario_name == "case_sensitivity":
-        cursor = conn.execute(
+    queries = {
+        "case_sensitivity": (
             "SELECT name, salary FROM employees "
-            "WHERE department = 'Engineering' "
-            "ORDER BY name"
-        )
-    elif scenario_name == "empty_result":
-        cursor = conn.execute(
+            "WHERE department = 'Engineering' ORDER BY name"
+        ),
+        "empty_result": (
             "SELECT name, salary FROM employees "
-            "WHERE department = 'Engineering' "
-            "ORDER BY name"
-        )
-    elif scenario_name == "null_handling":
-        cursor = conn.execute(
+            "WHERE department = 'Engineering' ORDER BY name"
+        ),
+        "null_handling": (
+            "SELECT name, salary FROM employees " "WHERE salary IS NULL ORDER BY name"
+        ),
+        # new aggregation fixes
+        "agg_missing_group_by": (
+            "SELECT department, AVG(salary) AS avg_salary "
+            "FROM employees GROUP BY department ORDER BY department"
+        ),
+        "agg_count_star_vs_column": (
+            "SELECT department, COUNT(salary) AS headcount "
+            "FROM employees WHERE salary > 80000 "
+            "GROUP BY department ORDER BY department"
+        ),
+        "agg_having_vs_where": (
+            "SELECT department, AVG(salary) AS avg_salary "
+            "FROM employees GROUP BY department "
+            "HAVING AVG(salary) > 88000 ORDER BY department"
+        ),
+        # new index fix
+        "no_index_like": (
             "SELECT name, salary FROM employees "
-            "WHERE salary IS NULL "
-            "ORDER BY name"
-        )
-    else:
-        cursor = conn.execute(
-            "SELECT name, salary FROM employees "
-            "WHERE department = 'Engineering' "
-            "ORDER BY name"
-        )
+            "WHERE department = 'Engineering' ORDER BY name"
+        ),
+    }
+    sql = queries.get(
+        scenario_name,
+        "SELECT name, salary FROM employees "
+        "WHERE department = 'Engineering' ORDER BY name",
+    )
+    cursor = conn.execute(sql)
     cols = [c[0] for c in cursor.description]
     return [dict(zip(cols, row)) for row in cursor.fetchall()]
 

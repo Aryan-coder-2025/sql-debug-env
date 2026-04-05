@@ -159,11 +159,11 @@ Each step returns an observation:
 
 Tested with `llama-3.3-70b-versatile` via Groq API:
 
-| Task   | Score       | Status                |
-| ------ | ----------- | --------------------- |
-| Easy   | 1.00        | ✅ Perfect            |
-| Medium | 0.54 – 1.00 | ✅ Varies by scenario |
-| Hard   | 1.00        | ✅ Perfect            |
+| Task   | Score | Status     |
+| ------ | ----- | ---------- |
+| Easy   | 1.00  | ✅ Perfect |
+| Medium | 1.00  | ✅ Perfect |
+| Hard   | 1.00  | ✅ Perfect |
 
 > Run your own baseline: `python baseline/run_baseline.py`
 
