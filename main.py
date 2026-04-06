@@ -428,3 +428,14 @@ def baseline():
         return run_all_tasks()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def main():
+    """Entry point for multi-node deployment."""
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)
+
+
+if __name__ == "__main__":
+    main()
+
