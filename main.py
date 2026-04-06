@@ -53,6 +53,7 @@ class ResetRequest(BaseModel):
             raise ValueError(f"task_id must be one of: easy, medium, hard. Got: '{v}'")
         return v
 
+
 class StepRequest(BaseModel):
     type: str
     sql: str = None
@@ -304,17 +305,24 @@ async def mcp(request: Request):
 
 
 @app.post("/reset")
-def reset(request: ResetRequest):
+async def reset(request: Request):
     try:
-        cleanup_sessions()
-        session_id = request.session_id or str(uuid.uuid4())
-        env = get_env(session_id)
-        obs = env.reset(request.task_id, request.scenario)
-        obs_dict = obs.dict() if hasattr(obs, "dict") else dict(obs)
-        obs_dict["session_id"] = session_id
-        return obs_dict
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Handle empty body gracefully
+        try:
+            body = await request.json()
+            task_id = body.get("task_id", "easy")
+        except:
+            task_id = "easy"  # default if no body sent
+
+        if task_id not in ["easy", "medium", "hard"]:
+            raise HTTPException(
+                status_code=400, detail=f"task_id must be one of: easy, medium, hard"
+            )
+
+        obs = env.reset(task_id)
+        return obs
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

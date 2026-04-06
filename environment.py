@@ -25,7 +25,7 @@ class SQLDebugEnv:
     def reset(self, task_id: str = "easy", scenario: str = None) -> Observation:
         logger.info(f"Resetting environment for task: {task_id}")
 
-        task = self._load_task(task_id, scenario)
+        task = self._load_task(task_id)
         self.current_task = task
         self.step_count = 0
         self.cumulative_reward = 0.0
