@@ -311,14 +311,17 @@ async def reset(request: Request):
         try:
             body = await request.json()
             task_id = body.get("task_id", "easy")
+            session_id = body.get("session_id")
         except:
             task_id = "easy"  # default if no body sent
+            session_id = None
 
         if task_id not in ["easy", "medium", "hard"]:
             raise HTTPException(
                 status_code=400, detail=f"task_id must be one of: easy, medium, hard"
             )
 
+        env = get_env(session_id)
         obs = env.reset(task_id)
         return obs
     except HTTPException:
