@@ -9,17 +9,15 @@ pinned: false
 
 # 🛠️ SQL Debug Environment
 
-> An OpenEnv-compatible reinforcement learning environment for training AI agents to debug SQL queries — built for the **OpenEnv Hackathon by Meta × Hugging Face × Scalar School of Technology**.
+An OpenEnv-compatible reinforcement learning environment for training AI agents to debug SQL queries — built for the OpenEnv Hackathon by Meta × Hugging Face × Scalar School of Technology.
 
-[![Live Demo](https://img.shields.io/badge/🤗%20HF%20Space-Live-blue)](https://aryan-coder-25-openenv.hf.space)
-[![Python](https://img.shields.io/badge/Python-3.12-green)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-orange)](https://fastapi.tiangolo.com)
+![Live Demo](https://img.shields.io/badge/Live-Demo-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green)
 
 ---
 
 ## 🧠 What This Environment Does
 
-An agent receives a **broken SQL query** and a **database schema**. It must fix the query step-by-step, earning rewards based on:
+An agent receives a broken SQL query and a database schema. It must fix the query step-by-step, earning rewards based on:
 
 - ✅ **Correctness** — does the output match the expected result?
 - ⚡ **Efficiency** — fewer steps = higher reward
@@ -60,11 +58,11 @@ https://aryan-coder-25-openenv.hf.space
 
 ## 🎮 Tasks
 
-| Task     | Difficulty | Database     | Description                                          |
-| -------- | ---------- | ------------ | ---------------------------------------------------- |
-| `easy`   | 🟢 Easy    | employees.db | Fix a syntax error in a broken SELECT query          |
-| `medium` | 🟡 Medium  | ecommerce.db | Fix wrong JOIN type causing missing rows             |
-| `hard`   | 🔴 Hard    | analytics.db | Fix correlated subquery logic + optimize performance |
+| Task   | Difficulty | Database     | Description                                          |
+| ------ | ---------- | ------------ | ---------------------------------------------------- |
+| easy   | 🟢 Easy    | employees.db | Fix a syntax error in a broken SELECT query          |
+| medium | 🟡 Medium  | ecommerce.db | Fix wrong JOIN type causing missing rows             |
+| hard   | 🔴 Hard    | analytics.db | Fix correlated subquery logic + optimize performance |
 
 ---
 
@@ -72,16 +70,18 @@ https://aryan-coder-25-openenv.hf.space
 
 | Method | Endpoint    | Description                     |
 | ------ | ----------- | ------------------------------- |
-| `GET`  | `/`         | Environment info and status     |
-| `GET`  | `/health`   | Health check                    |
-| `GET`  | `/tasks`    | List all tasks with schemas     |
-| `GET`  | `/state`    | Current environment state       |
-| `GET`  | `/grader`   | Get episode score               |
-| `GET`  | `/metadata` | Full environment metadata       |
-| `POST` | `/reset`    | Start a new episode             |
-| `POST` | `/step`     | Submit a SQL fix action         |
-| `POST` | `/mcp`      | MCP-compatible tool interface   |
-| `GET`  | `/baseline` | Run baseline agent on all tasks |
+| GET    | `/`         | Environment info and status     |
+| GET    | `/health`   | Health check                    |
+| GET    | `/tasks`    | List all tasks with schemas     |
+| GET    | `/state`    | Current environment state       |
+| GET    | `/grader`   | Get episode score               |
+| GET    | `/metadata` | Full environment metadata       |
+| GET    | `/validate` | OpenEnv spec self-validation    |
+| GET    | `/schema`   | Action and observation schemas  |
+| POST   | `/reset`    | Start a new episode             |
+| POST   | `/step`     | Submit a SQL fix action         |
+| POST   | `/mcp`      | MCP-compatible tool interface   |
+| GET    | `/baseline` | Run baseline agent on all tasks |
 
 ---
 
@@ -126,11 +126,12 @@ Each action is a JSON object:
 }
 ```
 
-| Field       | Type   | Required | Options                           |
-| ----------- | ------ | -------- | --------------------------------- |
-| `type`      | string | ✅       | `run_sql`, `fix_query`, `analyze` |
-| `sql`       | string | ✅       | Any valid SELECT query            |
-| `reasoning` | string | ❌       | Agent's explanation               |
+| Field      | Type   | Required | Options                     |
+| ---------- | ------ | -------- | --------------------------- |
+| type       | string | ✅       | run_sql, fix_query, analyze |
+| sql        | string | ✅       | Any valid SELECT query      |
+| reasoning  | string | ❌       | Agent's explanation         |
+| session_id | string | ❌       | Isolate concurrent sessions |
 
 ---
 
@@ -146,7 +147,8 @@ Each step returns an observation:
   "query_result": [{ "id": 1, "name": "Alice" }],
   "error_message": null,
   "step_count": 1,
-  "done": false
+  "done": false,
+  "session_id": "abc-123"
 }
 ```
 
@@ -154,13 +156,13 @@ Each step returns an observation:
 
 ## 🏆 Reward Structure
 
-| Condition                      | Value               |
-| ------------------------------ | ------------------- |
-| Correctness (0–100%)           | `0.0 – 1.0`         |
-| Efficiency bonus (fewer steps) | `up to +0.10`       |
-| Regression penalty (got worse) | `up to -0.10`       |
-| Empty query penalty            | `up to -0.10`       |
-| **Max possible score**         | **`1.00`** (capped) |
+| Condition                      | Value         |
+| ------------------------------ | ------------- |
+| Correctness (0–100%)           | 0.0 – 1.0     |
+| Efficiency bonus (fewer steps) | up to +0.10   |
+| Regression penalty (got worse) | up to -0.10   |
+| Empty query penalty            | up to -0.10   |
+| Max possible score             | 1.00 (capped) |
 
 ---
 
@@ -174,7 +176,18 @@ Tested with `llama-3.3-70b-versatile` via Groq API:
 | Medium | 1.00  | ✅ Perfect |
 | Hard   | 1.00  | ✅ Perfect |
 
-> Run your own baseline: `python baseline/run_baseline.py`
+Run your own baseline:
+
+```bash
+# Using Groq (free)
+GROQ_API_KEY=your_key python baseline/run_baseline.py
+
+# Using OpenAI
+OPENAI_API_KEY=your_key python baseline/run_baseline.py
+
+# Using Meta eval format
+HF_TOKEN=your_key API_BASE_URL=https://router.huggingface.co/v1 MODEL_NAME=Qwen/Qwen2.5-72B-Instruct python inference.py
+```
 
 ---
 
@@ -186,30 +199,55 @@ sql-debug-env/
 ├── environment.py           # Core RL environment logic
 ├── grader.py                # Episode scoring
 ├── models.py                # Pydantic models
+├── inference.py             # Meta eval inference script ([START]/[STEP]/[END])
+├── pyproject.toml           # Project metadata + openenv spec
+├── openenv.yaml             # OpenEnv environment manifest
+├── requirements.txt         # Python dependencies
+├── Dockerfile               # Container definition
 ├── baseline/
 │   └── run_baseline.py      # Baseline agent (LLM-powered)
 ├── tasks/
-│   ├── task_easy.py
-│   ├── task_medium.py
-│   └── task_hard.py
+│   ├── task_easy.py         # Syntax error task (employees.db)
+│   ├── task_medium.py       # JOIN logic task (ecommerce.db)
+│   └── task_hard.py         # 9 randomised hard scenarios (analytics.db)
 ├── databases/
-│   ├── employees.db
-│   ├── ecommerce.db
-│   └── analytics.db
-├── Dockerfile
-├── requirements.txt
-└── openenv.yaml
+│   ├── employees.db         # 7 employee records
+│   ├── ecommerce.db         # ecommerce schema
+│   └── analytics.db         # 100k+ sales rows
+└── server/
+    └── app.py               # Server entry point
 ```
 
 ---
 
 ## 🔧 Environment Variables
 
-| Variable         | Description                     | Default                 |
-| ---------------- | ------------------------------- | ----------------------- |
-| `GROQ_API_KEY`   | Groq API key for baseline agent | —                       |
-| `OPENAI_API_KEY` | OpenAI API key (fallback)       | —                       |
-| `SERVER_URL`     | Environment server URL          | `http://localhost:7860` |
+| Variable         | Description                    | Used By                  |
+| ---------------- | ------------------------------ | ------------------------ |
+| `HF_TOKEN`       | Hugging Face / API key         | inference.py             |
+| `API_BASE_URL`   | LLM API endpoint               | inference.py             |
+| `MODEL_NAME`     | Model identifier for inference | inference.py             |
+| `GROQ_API_KEY`   | Groq API key (free tier)       | baseline/run_baseline.py |
+| `OPENAI_API_KEY` | OpenAI API key (fallback)      | baseline/run_baseline.py |
+| `SERVER_URL`     | Environment server URL         | baseline/run_baseline.py |
+
+---
+
+## 🔌 MCP Support
+
+This environment supports the **Model Context Protocol (MCP)** via the `/mcp` endpoint, allowing direct integration with MCP-compatible AI agent frameworks:
+
+```json
+POST /mcp
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "reset",
+    "arguments": { "task_id": "hard", "session_id": "my-session" }
+  }
+}
+```
 
 ---
 
