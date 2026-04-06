@@ -1,0 +1,9 @@
+[project]
+name = "sql-debug-env"
+version = "1.0.0"
+description = "OpenEnv environment for training AI agents to debug SQL queries"
+requires-python = ">=3.10"
+
+[tool.openenv]
+name = "sql-debug-env"
+version = "1.0.0"
