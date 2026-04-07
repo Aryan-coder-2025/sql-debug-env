@@ -23,7 +23,7 @@ SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:7860")
 def run_task(task_id: str) -> float:
     if client is None:
         return {
-            "score": 0.0,
+            "score": 0.01,
             "error": "No API key set. Set GROQ_API_KEY or OPENAI_API_KEY.",
             "task_id": task_id,
         }
@@ -32,11 +32,11 @@ def run_task(task_id: str) -> float:
         r = httpx.post(f"{SERVER_URL}/reset", json={"task_id": task_id}, timeout=30)
         if r.status_code != 200:
             print(f"Reset failed: {r.status_code}")
-            return 0.0
+            return 0.01
 
         obs = r.json()
         if not obs.get("task_id"):
-            return 0.0
+            return 0.01
 
         messages = [
             {
@@ -125,12 +125,12 @@ def run_task(task_id: str) -> float:
 
         grader_r = httpx.get(f"{SERVER_URL}/grader", timeout=30)
         if grader_r.status_code == 200:
-            return grader_r.json().get("score", 0.0)
-        return 0.0
+            return round(max(0.01, min(0.99, float(grader_r.json().get("score", 0.01)))), 4)
+        return 0.01
 
     except Exception as e:
         print(f"Error on task {task_id}: {e}")
-        return 0.0
+        return 0.01
 
 
 def run_all_tasks() -> dict:

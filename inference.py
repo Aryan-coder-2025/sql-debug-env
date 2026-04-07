@@ -140,8 +140,8 @@ def run_task(task_id: str) -> float:
         # reset
         r = httpx.post(f"{SERVER_URL}/reset", json={"task_id": task_id}, timeout=30)
         if r.status_code != 200:
-            log_end(success=False, steps=0, score=0.0, rewards=[])
-            return 0.0
+            log_end(success=False, steps=0, score=0.01, rewards=[])
+            return 0.01
 
         obs = r.json()
         done = False
@@ -198,16 +198,16 @@ def run_task(task_id: str) -> float:
         # get final grader score
         grader_r = httpx.get(f"{SERVER_URL}/grader", timeout=30)
         if grader_r.status_code == 200:
-            score = float(grader_r.json().get("score", 0.0))
+            score = float(grader_r.json().get("score", 0.01))
         else:
-            score = max(rewards) if rewards else 0.0
+            score = max(rewards) if rewards else 0.01
 
-        score = min(max(score, 0.0), 1.0)
+        score = min(max(score, 0.01), 0.99)
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     except Exception as exc:
         print(f"[DEBUG] Task {task_id} error: {exc}", flush=True)
-        score = 0.0
+        score = 0.01
         success = False
 
     finally:

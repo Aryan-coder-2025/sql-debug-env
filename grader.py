@@ -2,7 +2,7 @@ def grade_episode(history, task):
     # Edge case: no history
     if not history:
         return {
-            "score": 0.0,
+            "score": 0.01,
             "correctness": 0.0,
             "total_steps": 0,
             "efficiency_bonus": 0.0,
@@ -45,9 +45,9 @@ def grade_episode(history, task):
         # Empty query penalty
         empty_penalty = round(min(0.1, empty_submissions * 0.02), 4)
 
-        # Final score
+        # Final score, strictly within (0, 1) for openenv validator
         final_score = correctness + efficiency_bonus - regression_penalty - empty_penalty
-        final_score = round(max(0.0, min(1.0, final_score)), 4)
+        final_score = round(max(0.01, min(0.99, final_score)), 4)
 
         return {
             "score": final_score,
@@ -64,9 +64,9 @@ def grade_episode(history, task):
 
     except Exception as e:
         return {
-            "score": 0.0,
+            "score": 0.01,
             "correctness": 0.0,
-            "total_steps": len(history),
+            "total_steps": len(history) if history else 0,
             "efficiency_bonus": 0.0,
             "reason": f"grader error: {str(e)}",
         }
