@@ -1,4 +1,4 @@
-﻿# Virtual environment
+# Virtual environment
 venv/
 
 # Python cache
@@ -23,3 +23,14 @@ Thumbs.db
 databases/*.db
 
 baseline_scores.py
+
+# Debug/reference output files (internal use only)
+edge_cases_output.txt
+grader_output.txt
+milestone_output.txt
+*_output.txt
+
+# Debug/test scripts (internal use only)
+debug_*.py
+stress_test.py
+test_*.py
