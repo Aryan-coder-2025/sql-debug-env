@@ -1,0 +1,24 @@
+============================================================
+FULL MILESTONE CHECK - DAY 1 to DAY 4
+============================================================
+
+health endpoint:        PASS - healthy
+tasks endpoint (3):     PASS - found 3
+reset easy:             PASS - status 200
+easy correctness=1.0:   PASS - got 1.0
+grader score>0.9:       PASS - got 1.0
+reset medium:           PASS
+medium correctness=1.0: PASS - got 1.0
+reset hard:             PASS
+hard correctness=1.0:   PASS - got 1.0
+state endpoint:         PASS
+safety filter:          PASS - Blocked: DROP not allowed
+wrong answer low score: PASS - reward=0.05
+metadata endpoint:      PASS
+
+============================================================
+RESULTS: 13/13 tests passed
+
+ALL TESTS PASSED
+DAY 1-4 MILESTONE 100% COMPLETE
+============================================================
