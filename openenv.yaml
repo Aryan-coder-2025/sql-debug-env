@@ -27,6 +27,10 @@ tasks:
     max_steps: 10
     reward_range: [0.0, 1.0]
 
+server:
+  entry_point: main:main
+  module: server.api:main
+
 endpoints:
   reset: POST /reset
   step: POST /step
