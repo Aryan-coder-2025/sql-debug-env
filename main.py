@@ -3,7 +3,7 @@ import uuid
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from models import Action
 from environment import SQLDebugEnv
 from grader import grade_episode
@@ -28,6 +28,7 @@ default_env = SQLDebugEnv()
 
 
 def get_env(session_id: str = None) -> SQLDebugEnv:
+    cleanup_sessions()
     if not session_id:
         return default_env
     if session_id not in sessions:
@@ -47,7 +48,8 @@ class ResetRequest(BaseModel):
     scenario: str = None
     session_id: str = None
 
-    @validator("task_id")
+    @field_validator("task_id", mode="before")
+    @classmethod
     def task_id_must_be_valid(cls, v):
         if v not in ["easy", "medium", "hard"]:
             raise ValueError(f"task_id must be one of: easy, medium, hard. Got: '{v}'")
@@ -311,10 +313,15 @@ async def reset(request: Request):
         try:
             body = await request.json()
             task_id = body.get("task_id", "easy")
+            scenario = body.get("scenario")
             session_id = body.get("session_id")
         except:
             task_id = "easy"  # default if no body sent
+            scenario = None
             session_id = None
+
+        if not session_id:
+            session_id = str(uuid.uuid4())
 
         if task_id not in ["easy", "medium", "hard"]:
             raise HTTPException(
@@ -322,7 +329,8 @@ async def reset(request: Request):
             )
 
         env = get_env(session_id)
-        obs = env.reset(task_id)
+        obs = env.reset(task_id, scenario=scenario)
+        obs.session_id = session_id
         return obs
     except HTTPException:
         raise
@@ -336,31 +344,9 @@ def step(action: Action, session_id: str = None):
         env = get_env(session_id)
         if not env.current_task:
             env.reset("easy")
-        if not action.sql or not action.sql.strip():
-            return {
-                "observation": {
-                    "task_id": env.current_task.task_id if env.current_task else None,
-                    "broken_query": (
-                        env.current_task.broken_query if env.current_task else ""
-                    ),
-                    "db_schema": (
-                        env.current_task.schema_sql if env.current_task else ""
-                    ),
-                    "query_result": None,
-                    "error_message": "Empty SQL query submitted",
-                    "step_count": env.step_count,
-                    "done": False,
-                },
-                "reward": {
-                    "step_reward": -0.05,
-                    "cumulative_reward": round(env.cumulative_reward - 0.05, 4),
-                    "correctness": 0.0,
-                    "performance": 0.0,
-                },
-                "done": False,
-                "info": {"error": "empty_sql"},
-            }
         obs, reward, done, info = env.step(action)
+        if session_id:
+            obs.session_id = session_id
         return {"observation": obs, "reward": reward, "done": done, "info": info}
     except HTTPException:
         raise
@@ -418,14 +404,14 @@ def grader(session_id: str = None):
 
 
 @app.get("/baseline")
-def baseline():
+async def baseline():
     try:
         hf_space_host = os.environ.get("SPACE_HOST", "")
         if hf_space_host:
             os.environ["SERVER_URL"] = f"https://{hf_space_host}"
         from baseline.run_baseline import run_all_tasks
 
-        return run_all_tasks()
+        return await run_all_tasks()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

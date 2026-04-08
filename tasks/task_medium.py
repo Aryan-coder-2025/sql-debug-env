@@ -155,6 +155,8 @@ ORDER BY c.name""",
 
 
 def create_db():
+    if os.path.exists(DB_PATH):
+        return
     try:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
