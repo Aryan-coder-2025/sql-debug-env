@@ -194,7 +194,13 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
 
         # Compute correctness and reward
         correctness = self._get_correctness(result, task.expected_output)
-        step_reward = self._calculate_reward(result, error, correctness)
+
+        # Track algorithmic efficiency using Query Cost Estimator
+        cost_modifier = 0.0
+        if not error and action.sql and action.sql.strip():
+            cost_modifier = self._get_query_plan_cost(action.sql, task.db_path)
+
+        step_reward = self._calculate_reward(result, error, correctness, cost_modifier)
         self.cumulative_reward = round(self.cumulative_reward + step_reward, 4)
 
         done = (self.step_count >= self.max_steps) or (correctness >= 1.0)
@@ -318,6 +324,49 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
             exec_time = (time.perf_counter() - start) * 1000
             return None, f"System Error: {str(e)}", exec_time
 
+    def _get_query_plan_cost(self, sql: str, db_path: str) -> float:
+        """Analyze the query plan to determine algorithmic cost modifiers.
+        
+        Penalizes full table scans (O(N)) and rewards optimal index searches (O(log N)).
+        """
+        if not sql or not os.path.exists(db_path):
+            return 0.0
+            
+        blocked, _ = self._safety_filter(sql)
+        if blocked:
+            return 0.0
+            
+        try:
+            db_uri = f"file:{db_path}?mode=ro"
+            with sqlite3.connect(db_uri, uri=True, timeout=2) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"EXPLAIN QUERY PLAN {sql}")
+                plan_rows = cursor.fetchall()
+                
+                cost_modifier = 0.0
+                scan_detected = False
+                search_detected = False
+                
+                for row in plan_rows:
+                    if len(row) >= 4:
+                        detail = str(row[3]).upper()
+                        # Detect Full Table Scans (avoid targeting covering index loops)
+                        if "SCAN" in detail and "COVERING INDEX" not in detail:
+                            scan_detected = True
+                        # Detect Optimized Lookups
+                        if "SEARCH" in detail and ("USING INDEX" in detail or "COVERING INDEX" in detail):
+                            search_detected = True
+                
+                if scan_detected:
+                    cost_modifier -= 0.1
+                elif search_detected:
+                    cost_modifier += 0.1
+                    
+                return cost_modifier
+        except Exception as e:
+            logger.debug(f"Failed to generate query plan cost: {e}")
+            return 0.0
+
     def _safety_filter(self, sql: str) -> Tuple[bool, str]:
         """Check if a SQL query is safe to execute (read-only).
 
@@ -398,23 +447,25 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
         return round(min(0.7, (matches / len(expected_normalized)) * 0.7), 4)
 
     def _calculate_reward(
-        self, result: Optional[List[Dict]], error: Optional[str], correctness: float
+        self, result: Optional[List[Dict]], error: Optional[str], correctness: float, cost_modifier: float = 0.0
     ) -> float:
-        """Calculate step reward based on execution result and correctness.
+        """Calculate step reward based on execution result, correctness, and query cost.
 
         Reward signals:
         - Error penalty: -0.05 for SQL errors
         - Valid result: +0.05 for any non-error result
         - Correctness bonuses: +0.20 (≥50%), +0.40 (≥90%), +0.20 (=100%)
         - Efficiency penalty: -0.05 per step after step 5
+        - Algorithmic Query Cost: Penalyze full table SCANS (-0.1), Reward Index SEARCH (+0.1)
 
         Args:
             result: Query result rows (None if error).
             error: Error message (None if success).
             correctness: Correctness score from _get_correctness.
+            cost_modifier: Efficiency modifier from _get_query_plan_cost.
 
         Returns:
-            Reward value for this step.
+            Reward value for this step capped strictly at 1.0 mechanism.
         """
         if error:
             return -0.05
@@ -430,6 +481,10 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
             reward += 0.20
         if self.step_count > 5:
             reward -= 0.05 * (self.step_count - 5)
+
+        # Apply algorithmic efficiency hooks while maintaining strict upper bound of 1.0
+        reward += cost_modifier
+        reward = max(-1.0, min(1.0, reward))
 
         return round(reward, 4)
 
