@@ -24,3 +24,6 @@ build-backend = "hatchling.build"
 [tool.openenv]
 name = "sql-debug-env"
 version = "1.0.0"
+
+[tool.pyright]
+extraPaths = ["."]
