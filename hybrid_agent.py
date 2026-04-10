@@ -55,7 +55,9 @@ class LLMPolicy:
         if "gpt" in model_name.lower():
             if not OpenAI:
                  raise ImportError("OpenAI SDK not installed. Run: pip install openai")
-            self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+            # Prevent Streamlit UI crash if key is missing locally by injecting a placeholder
+            resolved_key = api_key or os.getenv("OPENAI_API_KEY") or "mock_key_to_prevent_ui_crash"
+            self.client = OpenAI(api_key=resolved_key)
         else:
             self.client = None # Future extension: local vLLM or Ollama client
             
