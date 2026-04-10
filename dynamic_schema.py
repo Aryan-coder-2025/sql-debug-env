@@ -117,7 +117,7 @@ def generate_random_schema(seed: int = None, num_tables: Tuple[int, int] = (2, 5
         col_names = [c["name"] for c in cols]
         
         placeholders = ",".join(["?" for _ in cols])
-        insert_sql = f"INSERT INTO {t_name} ({','.join(col_names)}) VALUES ({placeholders})"
+        insert_sql = f"INSERT OR IGNORE INTO {t_name} ({','.join(col_names)}) VALUES ({placeholders})"
         
         rows_to_generate = random.randint(50, 500)
         generated_rows = []
