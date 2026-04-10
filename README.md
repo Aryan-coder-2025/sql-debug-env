@@ -27,21 +27,21 @@ graph TD
     classDef loop fill:#ea5455,stroke:#fff,stroke-width:2px,color:#fff,rx:10px
 
     subgraph Frontend["🖥️ Interactive Interfaces"]
-        DASH["📊 Live Debug Dashboard<br>(Streamlit UI)"] ::: ui
+        DASH["📊 Live Debug Dashboard<br>(Streamlit UI)"]
     end
 
     subgraph Agents["🧠 Intelligence Layer"]
         subgraph Hybrid["Hybrid Agent System"]
-            LLM["🤖 LLM Policy<br>(GPT/Llama)"] ::: agent
-            SYM["✅ Symbolic Validator<br>(sqlglot)"] ::: agent
-            RL["♻️ RLAIF Fine-Tuning<br>(PPO/DPO)"] ::: agent
+            LLM["🤖 LLM Policy<br>(GPT/Llama)"]
+            SYM["✅ Symbolic Validator<br>(sqlglot)"]
+            RL["♻️ RLAIF Fine-Tuning<br>(PPO/DPO)"]
             
             LLM -->|<font color='white'>Propose</font>| SYM
             SYM -->|<font color='white'>Self-Correct</font>| LLM
             RL -.->|<font color='white'>Update</font>| LLM
         end
         
-        ADV["👾 Adversarial Mutator<br>(Genetic Algorithm)"] ::: loop
+        ADV["👾 Adversarial Mutator<br>(Genetic Algorithm)"]
     end
 
     subgraph Backend["⚙️ OpenEnv Multi-Step Server"]
@@ -49,17 +49,17 @@ graph TD
         HTTP(["REST & MCP API"])
         
         subgraph Environment["RL Sandbox"]
-            MSE["🔄 Multi-Step Session<br>(Command History)"] ::: env
-            SDE["🛡️ SQLDebugEnv<br>(Core Logic)"] ::: env
-            GRADER["⚖️ Grader<br>(Efficiency + Precision)"] ::: env
+            MSE["🔄 Multi-Step Session<br>(Command History)"]
+            SDE["🛡️ SQLDebugEnv<br>(Core Logic)"]
+            GRADER["⚖️ Grader<br>(Efficiency + Precision)"]
             
             MSE --> SDE
             SDE --> GRADER
         end
         
         subgraph SchemaData["Dynamic Resources"]
-            DS["🎲 Dynamic Schema Gen<br>(Faker Noise)"] ::: db
-            DB[(SQLite Databases<br>100k+ Rows)] ::: db
+            DS["🎲 Dynamic Schema Gen<br>(Faker Noise)"]
+            DB[(SQLite Databases<br>100k+ Rows)]
             
             DS --> DB
         end
@@ -72,6 +72,13 @@ graph TD
     HTTP --> SDE
     SDE --> DB
     
+    %% Assign Classes
+    class DASH ui
+    class LLM,SYM,RL agent
+    class ADV loop
+    class MSE,SDE,GRADER env
+    class DS,DB db
+
     %% Colors and Styling
     style Frontend fill:#191b28,stroke:#ff7eb3,stroke-width:2px,color:#fff
     style Agents fill:#191b28,stroke:#7367f0,stroke-width:2px,color:#fff
