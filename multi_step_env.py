@@ -28,8 +28,8 @@ except ImportError:
             class Env: pass
         gym = _GymStub()
         class _SpacesStub:
-            def Text(self, **kwargs): return None
-            def Dict(self, **kwargs): return None
+            def Text(self, *args, **kwargs): return None
+            def Dict(self, *args, **kwargs): return None
         spaces = _SpacesStub()
         MODERN_GYM = False
 
