@@ -75,16 +75,19 @@ class LLMPolicy:
         )
         
         if self.client:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": observation}
-                ],
-                max_tokens=600,
-                temperature=0.2
-            )
-            return response.choices[0].message.content.strip()
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": observation}
+                    ],
+                    max_tokens=600,
+                    temperature=0.2
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                return "GIVE_UP\n-- Missing valid OPENAI_API_KEY. Add key to environment to enable LLM generation."
         else:
             # Fallback for unconnected local testing
             return "SHOW_TABLES"
