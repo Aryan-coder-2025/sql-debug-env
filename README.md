@@ -11,84 +11,93 @@ pinned: false
 
 An OpenEnv-compatible reinforcement learning environment for training AI agents to debug SQL queries — built for the **OpenEnv Hackathon by Meta × Hugging Face × Scaler School of Technology**.
 
-![Live Demo](https://img.shields.io/badge/Live-Demo-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![FastAPI](https://img.shields.io/badge/FastAPI-0.135-green) ![OpenEnv](https://img.shields.io/badge/OpenEnv-0.2.3-purple)
+![Live Demo](https://img.shields.io/badge/Live-Demo-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![FastAPI](https://img.shields.io/badge/FastAPI-0.135-green) ![OpenEnv](https://img.shields.io/badge/OpenEnv-0.2.3-purple) ![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B)
 
 ---
 
 ## 🏗️ Architecture
 
 ```mermaid
-graph TB
-    subgraph Agent["🤖 Agent (LLM)"]
-        A1[Observe broken query]
-        A2[Generate fix SQL]
-        A3[Submit action]
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#1e1e2e', 'primaryTextColor': '#cdd6f4', 'primaryBorderColor': '#89b4fa', 'lineColor': '#f38ba8', 'secondaryColor': '#ffb86c', 'tertiaryColor': '#a6e3a1'}}}%%
+graph TD
+    classDef ui fill:#ff7eb3,stroke:#fff,stroke-width:2px,color:#fff,rx:10px
+    classDef agent fill:#7367f0,stroke:#fff,stroke-width:2px,color:#fff,rx:10px
+    classDef env fill:#28c76f,stroke:#fff,stroke-width:2px,color:#fff,rx:10px
+    classDef db fill:#00cfe8,stroke:#fff,stroke-width:2px,color:#fff,rx:10px
+    classDef loop fill:#ea5455,stroke:#fff,stroke-width:2px,color:#fff,rx:10px
+
+    subgraph Frontend["🖥️ Interactive Interfaces"]
+        DASH["📊 Live Debug Dashboard<br>(Streamlit UI)"] ::: ui
     end
 
-    subgraph Server["🖥️ SQL Debug Environment Server"]
-        WS["/ws WebSocket<br>OpenEnv Protocol"]
-        HTTP["/reset /step /state<br>REST API"]
-        MCP["/mcp<br>Model Context Protocol"]
-
-        subgraph Core["Core Environment"]
-            ENV["SQLDebugEnv<br>(Environment base class)"]
-            SAFETY["Safety Filter<br>Read-only enforcement"]
-            GRADER["Episode Grader<br>Correctness + Efficiency"]
-            METRICS["Telemetry<br>/metrics endpoint"]
-            TRAJ["Trajectory Logger<br>JSON export"]
+    subgraph Agents["🧠 Intelligence Layer"]
+        subgraph Hybrid["Hybrid Agent System"]
+            LLM["🤖 LLM Policy<br>(GPT/Llama)"] ::: agent
+            SYM["✅ Symbolic Validator<br>(sqlglot)"] ::: agent
+            RL["♻️ RLAIF Fine-Tuning<br>(PPO/DPO)"] ::: agent
+            
+            LLM -->|<font color='white'>Propose</font>| SYM
+            SYM -->|<font color='white'>Self-Correct</font>| LLM
+            RL -.->|<font color='white'>Update</font>| LLM
         end
+        
+        ADV["👾 Adversarial Mutator<br>(Genetic Algorithm)"] ::: loop
+    end
 
-        subgraph Tasks["Task Registry"]
-            T1["🟢 Easy<br>11 syntax scenarios"]
-            T2["🟡 Medium<br>9 JOIN scenarios"]
-            T3["🔴 Hard<br>9 CTE/subquery scenarios"]
-            T4["🔒 Security<br>5 injection scenarios"]
+    subgraph Backend["⚙️ OpenEnv Multi-Step Server"]
+        WS(["/ws WebSocket<br>OpenEnv Protocol"])
+        HTTP(["REST & MCP API"])
+        
+        subgraph Environment["RL Sandbox"]
+            MSE["🔄 Multi-Step Session<br>(Command History)"] ::: env
+            SDE["🛡️ SQLDebugEnv<br>(Core Logic)"] ::: env
+            GRADER["⚖️ Grader<br>(Efficiency + Precision)"] ::: env
+            
+            MSE --> SDE
+            SDE --> GRADER
         end
-
-        subgraph DB["SQLite Databases"]
-            D1["employees.db"]
-            D2["ecommerce.db"]
-            D3["analytics.db<br>100K+ rows"]
+        
+        subgraph SchemaData["Dynamic Resources"]
+            DS["🎲 Dynamic Schema Gen<br>(Faker Noise)"] ::: db
+            DB[(SQLite Databases<br>100k+ Rows)] ::: db
+            
+            DS --> DB
         end
     end
 
-    subgraph Client["📦 Client SDK"]
-        C1["SQLDebugEnv<br>(EnvClient subclass)"]
-        C2["Sync + Async API"]
-    end
-
-    A3 --> WS
-    A3 --> HTTP
-    WS --> ENV
-    HTTP --> ENV
-    MCP --> ENV
-    ENV --> SAFETY
-    SAFETY --> DB
-    ENV --> GRADER
-    ENV --> METRICS
-    ENV --> TRAJ
-    ENV --> Tasks
-    Client --> WS
+    DASH -->|<font color='white'>Visualize</font>| Hybrid
+    Hybrid -->|<font color='white'>Actions</font>| WS
+    ADV -->|<font color='white'>Inject Bugs</font>| MSE
+    WS --> MSE
+    HTTP --> SDE
+    SDE --> DB
+    
+    %% Colors and Styling
+    style Frontend fill:#191b28,stroke:#ff7eb3,stroke-width:2px,color:#fff
+    style Agents fill:#191b28,stroke:#7367f0,stroke-width:2px,color:#fff
+    style Backend fill:#191b28,stroke:#28c76f,stroke-width:2px,color:#fff
+    style Environment fill:#1e1e2e,stroke:#28c76f,stroke-dasharray: 5 5,color:#fff
+    style SchemaData fill:#1e1e2e,stroke:#00cfe8,stroke-dasharray: 5 5,color:#fff
 ```
 
 ---
 
 ## 🧠 What This Environment Does
 
-An agent receives a broken SQL query and a database schema. It must fix the query step-by-step, earning rewards based on:
+An agent receives a broken SQL query and a database schema. It must fix the query interactively over **multiple steps** via a conversational debug session (`EXPLAIN`, `DESCRIBE`, `SUBMIT_QUERY`), earning rewards based on:
 
 - ✅ **Correctness** — does the output match the expected result?
-- ⚡ **Efficiency** — fewer steps = higher reward
-- 🎯 **Precision** — partial credit for partially correct results
-- 🔒 **Security** — identify and fix SQL injection vulnerabilities
+- ⚡ **Efficiency** — fewer meta-actions = higher reward
+- 🎯 **Exploration** — partial credit for utilizing `EXPLAIN` or introspecting the schema
+- 🤖 **Self-Correction** — symbolic validation catches hallucinatory queries before they drop reward
 
-The environment supports **4 difficulty levels** across real SQLite databases with 100k+ rows.
+The environment supports **4 difficulty levels** + **dynamic schemas** continuously evolved by our genetic Adversarial Generator.
 
 ---
 
 ## 🚀 Quick Start
 
-### Run Locally
+### 1. Run the Backend OpenEnv Server Locally
 
 ```bash
 git clone https://github.com/Aryan-coder-2025/sql-debug-env
@@ -97,31 +106,19 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Run with Docker
+### 2. View the Live Streamlit Dashboard
 
+In a new terminal to visualize the Hybrid Agent dynamically fixing queries:
 ```bash
-docker build -t sql-debug-env .
-docker run -p 7860:7860 sql-debug-env
+pip install streamlit pandas plotly sqlglot openai faker
+streamlit run dashboard.py
 ```
 
-### Use as a Client (Python SDK)
+### 3. Run the Genetic Adversarial Generator
 
-```python
-from client import SQLDebugEnv, SQLDebugAction
-
-# Async usage (recommended)
-async with SQLDebugEnv(base_url="https://aryan-coder-25-openenv.hf.space") as env:
-    result = await env.reset(task_id="easy")
-    print(result.observation.broken_query)
-    
-    action = SQLDebugAction(type="run_sql", sql="SELECT name FROM employees")
-    result = await env.step(action)
-    print(f"Correctness: {result.observation.metadata['correctness']}")
-
-# Sync usage
-with SQLDebugEnv(base_url="http://localhost:7860").sync() as env:
-    result = env.reset(task_id="medium")
-    result = env.step(SQLDebugAction(type="fix_query", sql="..."))
+Watch a self-improving loop of mutated SQL bugs compete against the LLM Agent:
+```bash
+python adversarial_generator.py
 ```
 
 ---
@@ -130,68 +127,34 @@ with SQLDebugEnv(base_url="http://localhost:7860").sync() as env:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/` | Environment info and endpoint list |
-| `GET` | `/health` | Health check (`{"status": "healthy"}`) |
-| `POST` | `/reset` | Start a new episode (`task_id`, `session_id`) |
-| `POST` | `/step` | Submit SQL action (`type`, `sql`, `reasoning`) |
-| `GET` | `/state` | Current episode state |
-| `GET` | `/tasks` | List all available tasks |
-| `GET` | `/grader` | Episode score (correctness + efficiency) |
-| `GET` | `/schema` | Action/Observation JSON schemas |
-| `GET` | `/validate` | Self-validation check |
-| `GET` | `/metrics` | Live telemetry (sessions, success rate) |
-| `GET` | `/trajectories` | List trajectory replay files |
-| `GET` | `/baseline` | Run baseline agent |
 | `WS` | `/ws` | WebSocket (OpenEnv protocol) |
 | `POST` | `/mcp` | Model Context Protocol (JSON-RPC 2.0) |
-
-### Reset
-
-```bash
-curl -X POST http://localhost:7860/reset \
-  -H "Content-Type: application/json" \
-  -d '{"task_id": "easy", "session_id": "my-session"}'
-```
-
-### Step
-
-```bash
-curl -X POST http://localhost:7860/step \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "run_sql",
-    "sql": "SELECT name, salary FROM employees WHERE department = '\''Engineering'\''",
-    "session_id": "my-session"
-  }'
-```
+| `POST` | `/reset` | Start a new episode (`task_id`, `session_id`) |
+| `POST` | `/step` | Submit SQL action (`type`, `sql`, `reasoning`) |
+| `GET` | `/schema` | Action/Observation JSON schemas |
+| `GET` | `/metrics` | Live telemetry (sessions, success rate) |
+| `GET` | `/trajectories` | List trajectory replay files |
 
 ---
 
-## 🎯 Tasks
+## 🎯 Task Generation
 
-| Task | Difficulty | Scenarios | Description |
-|------|-----------|-----------|-------------|
-| `easy` | 🟢 Easy | 11 | Syntax errors (typos, missing keywords) |
-| `medium` | 🟡 Medium | 9 | JOIN logic bugs (wrong join type, missing conditions) |
-| `hard` | 🔴 Hard | 9 | CTE/subquery optimization, correlated queries |
-| `security` | 🔒 Hard | 5 | SQL injection, data leaks, tautology attacks |
-
-**Total: 34 unique scenarios** across 3 SQLite databases.
+We use two distinct methods to challenge the agents:
+1. **Static Task Registry**: 34 handmade scenarios across 3 distinct real-world databases spanning syntax, JOIN logic, subqueries, and strict Security (SQL injections).
+2. **Dynamic Generation (`dynamic_schema.py`)**: Uses `Faker` to inject noisy schemas (NULLs, dirty strings in INT fields, duplicates).
+3. **Adversarial Muation (`adversarial_generator.py`)**: A Genetic Algorithm rips apart correct queries (dropping conditionals, breaking `ON` statements) explicitly optimizing to defeat the LLM agent.
 
 ---
 
 ## 📊 Reward Structure
 
-| Signal | Value | Description |
+| Action / Signal | Value | Description |
 |--------|-------|-------------|
-| SQL error | -0.05 | Query failed to execute |
-| Valid result | +0.05 | Non-error query result |
-| ≥50% correct | +0.20 | Partial match bonus |
-| ≥90% correct | +0.40 | Near-perfect bonus |
-| 100% correct | +0.20 | Exact match bonus |
-| Late steps | -0.05/step | Penalty after step 5 |
-
-**Grading formula**: `score = best_correctness + efficiency_bonus - regression_penalty - empty_penalty`
+| Final Correct Query | +1.00 | Exact output state match |
+| Use `DESCRIBE <table>` | +0.20 | Positive reward for inspecting schemas involved |
+| Use `EXPLAIN <sql>` | +0.10 | Positive reward for investigating query plans |
+| SQL Execution Error | -0.05 | Query failed or was hallucinated |
+| Late steps | -1.00 | Penalty after hitting max steps (Timeout) |
 
 ---
 
@@ -201,72 +164,36 @@ This environment fully integrates with the [OpenEnv](https://github.com/meta-pyt
 
 - ✅ `Environment` base class from `openenv-core`
 - ✅ `HTTPEnvServer` for WebSocket + MCP transport
-- ✅ `EnvClient` subclass for SDK usage
-- ✅ `openenv.yaml` manifest
 - ✅ Typed `Action`, `Observation`, `State` models
 - ✅ Concurrent session support (50 max)
-- ✅ Docker containerization with health checks
-
----
-
-## 📈 Observability
-
-### Metrics Endpoint (`/metrics`)
-```json
-{
-  "total_sessions": 42,
-  "total_steps": 186,
-  "total_episodes": 15,
-  "successful_episodes": 9,
-  "success_rate": 0.6,
-  "avg_steps_per_episode": 3.2,
-  "avg_score": 0.87
-}
-```
-
-### Trajectory Replay (`/trajectories`)
-Every completed episode is saved as a JSON file in `outputs/trajectories/` with full action/reward history for debugging and analysis.
-
----
-
-## 🛡️ Safety
-
-- Read-only database access (SQLite `?mode=ro`)
-- DDL/DML blocking (DROP, DELETE, INSERT, UPDATE)
-- Query timeout (5 seconds)
-- Session isolation per `session_id`
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 sql-debug-env/
-├── __init__.py            # Package exports
-├── main.py                # FastAPI app + REST API
-├── environment.py         # SQLDebugEnv(Environment) - core RL logic
-├── models.py              # Action, Observation, State (OpenEnv types)
-├── client.py              # SQLDebugEnv(EnvClient) - SDK client
-├── grader.py              # Episode grading logic
-├── openenv.yaml           # OpenEnv manifest
-├── pyproject.toml         # Package configuration
-├── requirements.txt       # Dependencies
-├── Dockerfile             # Container image
-├── inference.py           # Baseline inference script
-├── final_check.py         # Submission validation
-├── server/
-│   ├── app.py             # OpenEnv create_fastapi_app entry
-│   └── api.py             # Alternative entry point
+├── backend_core/
+│   ├── main.py                # FastAPI Server + REST + WS Endpoints
+│   ├── environment.py         # SQLDebugEnv (Environment base)
+│   ├── models.py              # OpenEnv Pydantic types
+│   ├── grader.py              # Evaluation (Correctness vs Efficiency)
+│   ├── openenv.yaml           # OpenEnv manifest
+│   └── client.py              # EnvClient SDK
+│
+├── frontend_ui/
+│   └── dashboard.py           # 📊 Live Streamlit Debugging UI
+│
+├── agent_intelligence/
+│   ├── hybrid_agent.py        # 🤖 LLM Policy + Symbolic Validator (sqlglot)
+│   ├── adversarial_generator.py # 👾 Genetic Mutator to craft difficult SQL bugs
+│   ├── multi_step_env.py      # 🔄 Gym wrapper tracking session history & sparse rewards
+│   └── dynamic_schema.py      # 🎲 Noisy Data / Schema Generator (Faker)
+│
 ├── tasks/
-│   ├── task_easy.py       # 11 syntax error scenarios
-│   ├── task_medium.py     # 9 JOIN logic scenarios
-│   ├── task_hard.py       # 9 CTE/subquery scenarios
-│   └── task_security.py   # 5 SQL injection scenarios
-├── baseline/
-│   └── run_baseline.py    # LLM baseline agent
-├── databases/             # SQLite databases (auto-generated)
+│   └── task_{level}.py        # Baseline static tasks (Easy, Med, Hard, Security)
 └── outputs/
-    └── trajectories/      # Episode replay logs (JSON)
+    └── trajectories/          # Auto-saved chronological replay logs (JSON)
 ```
 
 ---
