@@ -9,9 +9,67 @@ pinned: false
 
 # 🛠️ SQL Debug Environment
 
-An OpenEnv-compatible reinforcement learning environment for training AI agents to debug SQL queries — built for the OpenEnv Hackathon by Meta × Hugging Face × Scalar School of Technology.
+An OpenEnv-compatible reinforcement learning environment for training AI agents to debug SQL queries — built for the **OpenEnv Hackathon by Meta × Hugging Face × Scaler School of Technology**.
 
-![Live Demo](https://img.shields.io/badge/Live-Demo-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green)
+![Live Demo](https://img.shields.io/badge/Live-Demo-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![FastAPI](https://img.shields.io/badge/FastAPI-0.135-green) ![OpenEnv](https://img.shields.io/badge/OpenEnv-0.2.3-purple)
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+graph TB
+    subgraph Agent["🤖 Agent (LLM)"]
+        A1[Observe broken query]
+        A2[Generate fix SQL]
+        A3[Submit action]
+    end
+
+    subgraph Server["🖥️ SQL Debug Environment Server"]
+        WS["/ws WebSocket<br>OpenEnv Protocol"]
+        HTTP["/reset /step /state<br>REST API"]
+        MCP["/mcp<br>Model Context Protocol"]
+
+        subgraph Core["Core Environment"]
+            ENV["SQLDebugEnv<br>(Environment base class)"]
+            SAFETY["Safety Filter<br>Read-only enforcement"]
+            GRADER["Episode Grader<br>Correctness + Efficiency"]
+            METRICS["Telemetry<br>/metrics endpoint"]
+            TRAJ["Trajectory Logger<br>JSON export"]
+        end
+
+        subgraph Tasks["Task Registry"]
+            T1["🟢 Easy<br>11 syntax scenarios"]
+            T2["🟡 Medium<br>9 JOIN scenarios"]
+            T3["🔴 Hard<br>9 CTE/subquery scenarios"]
+            T4["🔒 Security<br>5 injection scenarios"]
+        end
+
+        subgraph DB["SQLite Databases"]
+            D1["employees.db"]
+            D2["ecommerce.db"]
+            D3["analytics.db<br>100K+ rows"]
+        end
+    end
+
+    subgraph Client["📦 Client SDK"]
+        C1["SQLDebugEnv<br>(EnvClient subclass)"]
+        C2["Sync + Async API"]
+    end
+
+    A3 --> WS
+    A3 --> HTTP
+    WS --> ENV
+    HTTP --> ENV
+    MCP --> ENV
+    ENV --> SAFETY
+    SAFETY --> DB
+    ENV --> GRADER
+    ENV --> METRICS
+    ENV --> TRAJ
+    ENV --> Tasks
+    Client --> WS
+```
 
 ---
 
@@ -22,8 +80,9 @@ An agent receives a broken SQL query and a database schema. It must fix the quer
 - ✅ **Correctness** — does the output match the expected result?
 - ⚡ **Efficiency** — fewer steps = higher reward
 - 🎯 **Precision** — partial credit for partially correct results
+- 🔒 **Security** — identify and fix SQL injection vulnerabilities
 
-The environment supports 3 difficulty levels across real SQLite databases with 100k+ rows.
+The environment supports **4 difficulty levels** across real SQLite databases with 100k+ rows.
 
 ---
 
@@ -34,11 +93,8 @@ The environment supports 3 difficulty levels across real SQLite databases with 1
 ```bash
 git clone https://github.com/Aryan-coder-2025/sql-debug-env
 cd sql-debug-env
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # Mac/Linux
 pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 7860
+python main.py
 ```
 
 ### Run with Docker
@@ -48,209 +104,183 @@ docker build -t sql-debug-env .
 docker run -p 7860:7860 sql-debug-env
 ```
 
-### Live API
-
-```
-https://aryan-coder-25-openenv.hf.space
-```
-
----
-
-## 🎮 Tasks
-
-| Task   | Difficulty | Database     | Description                                          |
-| ------ | ---------- | ------------ | ---------------------------------------------------- |
-| easy   | 🟢 Easy    | employees.db | Fix a syntax error in a broken SELECT query          |
-| medium | 🟡 Medium  | ecommerce.db | Fix wrong JOIN type causing missing rows             |
-| hard   | 🔴 Hard    | analytics.db | Fix correlated subquery logic + optimize performance |
-
----
-
-## 📡 API Endpoints
-
-| Method | Endpoint    | Description                     |
-| ------ | ----------- | ------------------------------- |
-| GET    | `/`         | Environment info and status     |
-| GET    | `/health`   | Health check                    |
-| GET    | `/tasks`    | List all tasks with schemas     |
-| GET    | `/state`    | Current environment state       |
-| GET    | `/grader`   | Get episode score               |
-| GET    | `/metadata` | Full environment metadata       |
-| GET    | `/validate` | OpenEnv spec self-validation    |
-| GET    | `/schema`   | Action and observation schemas  |
-| POST   | `/reset`    | Start a new episode             |
-| POST   | `/step`     | Submit a SQL fix action         |
-| POST   | `/mcp`      | MCP-compatible tool interface   |
-| GET    | `/baseline` | Run baseline agent on all tasks |
-
----
-
-## 🔄 Agent Loop
+### Use as a Client (Python SDK)
 
 ```python
-import httpx
+from client import SQLDebugEnv, SQLDebugAction
 
-BASE = "https://aryan-coder-25-openenv.hf.space"
+# Async usage (recommended)
+async with SQLDebugEnv(base_url="https://aryan-coder-25-openenv.hf.space") as env:
+    result = await env.reset(task_id="easy")
+    print(result.observation.broken_query)
+    
+    action = SQLDebugAction(type="run_sql", sql="SELECT name FROM employees")
+    result = await env.step(action)
+    print(f"Correctness: {result.observation.metadata['correctness']}")
 
-# 1. Reset the environment
-obs = httpx.post(f"{BASE}/reset", json={"task_id": "easy"}).json()
-print(obs["broken_query"])   # The broken SQL to fix
-print(obs["db_schema"])      # The database schema
-
-# 2. Submit a fix
-result = httpx.post(f"{BASE}/step", json={
-    "type": "run_sql",
-    "sql": "SELECT * FROM employees WHERE department = 'HR'",
-    "reasoning": "Fixed missing quotes around string value"
-}).json()
-
-print(result["reward"]["correctness"])  # 0.0 to 1.0
-print(result["done"])                   # True if episode complete
-
-# 3. Get final score
-score = httpx.get(f"{BASE}/grader").json()
-print(score["score"])  # Final episode score
+# Sync usage
+with SQLDebugEnv(base_url="http://localhost:7860").sync() as env:
+    result = env.reset(task_id="medium")
+    result = env.step(SQLDebugAction(type="fix_query", sql="..."))
 ```
 
 ---
 
-## 📐 Action Space
+## 📡 API Reference
 
-Each action is a JSON object:
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Environment info and endpoint list |
+| `GET` | `/health` | Health check (`{"status": "healthy"}`) |
+| `POST` | `/reset` | Start a new episode (`task_id`, `session_id`) |
+| `POST` | `/step` | Submit SQL action (`type`, `sql`, `reasoning`) |
+| `GET` | `/state` | Current episode state |
+| `GET` | `/tasks` | List all available tasks |
+| `GET` | `/grader` | Episode score (correctness + efficiency) |
+| `GET` | `/schema` | Action/Observation JSON schemas |
+| `GET` | `/validate` | Self-validation check |
+| `GET` | `/metrics` | Live telemetry (sessions, success rate) |
+| `GET` | `/trajectories` | List trajectory replay files |
+| `GET` | `/baseline` | Run baseline agent |
+| `WS` | `/ws` | WebSocket (OpenEnv protocol) |
+| `POST` | `/mcp` | Model Context Protocol (JSON-RPC 2.0) |
 
-```json
-{
-  "type": "run_sql",
-  "sql": "SELECT id, name FROM employees WHERE active = 1",
-  "reasoning": "Fixed column name and added WHERE clause"
-}
-```
-
-| Field      | Type   | Required | Options                     |
-| ---------- | ------ | -------- | --------------------------- |
-| type       | string | ✅       | run_sql, fix_query, analyze |
-| sql        | string | ✅       | Any valid SELECT query      |
-| reasoning  | string | ❌       | Agent's explanation         |
-| session_id | string | ❌       | Isolate concurrent sessions |
-
----
-
-## 👁️ Observation Space
-
-Each step returns an observation:
-
-```json
-{
-  "task_id": "easy",
-  "broken_query": "SELEC * FORM employees",
-  "db_schema": "CREATE TABLE employees ...",
-  "query_result": [{ "id": 1, "name": "Alice" }],
-  "error_message": null,
-  "step_count": 1,
-  "done": false,
-  "session_id": "abc-123"
-}
-```
-
----
-
-## 🏆 Reward Structure
-
-| Condition                      | Value         |
-| ------------------------------ | ------------- |
-| Correctness (0–100%)           | 0.0 – 1.0     |
-| Efficiency bonus (fewer steps) | up to +0.10   |
-| Regression penalty (got worse) | up to -0.10   |
-| Empty query penalty            | up to -0.10   |
-| Max possible score             | 1.00 (capped) |
-
----
-
-## 📊 Baseline Scores
-
-Tested with `llama-3.3-70b-versatile` via Groq API:
-
-| Task   | Score | Status     |
-| ------ | ----- | ---------- |
-| Easy   | 1.00  | ✅ Perfect |
-| Medium | 1.00  | ✅ Perfect |
-| Hard   | 1.00  | ✅ Perfect |
-
-Run your own baseline:
+### Reset
 
 ```bash
-# Using Groq (free)
-GROQ_API_KEY=your_key python baseline/run_baseline.py
+curl -X POST http://localhost:7860/reset \
+  -H "Content-Type: application/json" \
+  -d '{"task_id": "easy", "session_id": "my-session"}'
+```
 
-# Using OpenAI
-OPENAI_API_KEY=your_key python baseline/run_baseline.py
+### Step
 
-# Using Meta eval format
-HF_TOKEN=your_key API_BASE_URL=https://router.huggingface.co/v1 MODEL_NAME=Qwen/Qwen2.5-72B-Instruct python inference.py
+```bash
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "run_sql",
+    "sql": "SELECT name, salary FROM employees WHERE department = '\''Engineering'\''",
+    "session_id": "my-session"
+  }'
 ```
 
 ---
 
-## 🗂️ Project Structure
+## 🎯 Tasks
+
+| Task | Difficulty | Scenarios | Description |
+|------|-----------|-----------|-------------|
+| `easy` | 🟢 Easy | 11 | Syntax errors (typos, missing keywords) |
+| `medium` | 🟡 Medium | 9 | JOIN logic bugs (wrong join type, missing conditions) |
+| `hard` | 🔴 Hard | 9 | CTE/subquery optimization, correlated queries |
+| `security` | 🔒 Hard | 5 | SQL injection, data leaks, tautology attacks |
+
+**Total: 34 unique scenarios** across 3 SQLite databases.
+
+---
+
+## 📊 Reward Structure
+
+| Signal | Value | Description |
+|--------|-------|-------------|
+| SQL error | -0.05 | Query failed to execute |
+| Valid result | +0.05 | Non-error query result |
+| ≥50% correct | +0.20 | Partial match bonus |
+| ≥90% correct | +0.40 | Near-perfect bonus |
+| 100% correct | +0.20 | Exact match bonus |
+| Late steps | -0.05/step | Penalty after step 5 |
+
+**Grading formula**: `score = best_correctness + efficiency_bonus - regression_penalty - empty_penalty`
+
+---
+
+## 🔌 OpenEnv Framework Integration
+
+This environment fully integrates with the [OpenEnv](https://github.com/meta-pytorch/OpenEnv) framework:
+
+- ✅ `Environment` base class from `openenv-core`
+- ✅ `HTTPEnvServer` for WebSocket + MCP transport
+- ✅ `EnvClient` subclass for SDK usage
+- ✅ `openenv.yaml` manifest
+- ✅ Typed `Action`, `Observation`, `State` models
+- ✅ Concurrent session support (50 max)
+- ✅ Docker containerization with health checks
+
+---
+
+## 📈 Observability
+
+### Metrics Endpoint (`/metrics`)
+```json
+{
+  "total_sessions": 42,
+  "total_steps": 186,
+  "total_episodes": 15,
+  "successful_episodes": 9,
+  "success_rate": 0.6,
+  "avg_steps_per_episode": 3.2,
+  "avg_score": 0.87
+}
+```
+
+### Trajectory Replay (`/trajectories`)
+Every completed episode is saved as a JSON file in `outputs/trajectories/` with full action/reward history for debugging and analysis.
+
+---
+
+## 🛡️ Safety
+
+- Read-only database access (SQLite `?mode=ro`)
+- DDL/DML blocking (DROP, DELETE, INSERT, UPDATE)
+- Query timeout (5 seconds)
+- Session isolation per `session_id`
+
+---
+
+## 📁 Project Structure
 
 ```
 sql-debug-env/
-├── main.py                  # FastAPI app + all endpoints
-├── environment.py           # Core RL environment logic
-├── grader.py                # Episode scoring
-├── models.py                # Pydantic models
-├── inference.py             # Meta eval inference script ([START]/[STEP]/[END])
-├── pyproject.toml           # Project metadata + openenv spec
-├── openenv.yaml             # OpenEnv environment manifest
-├── requirements.txt         # Python dependencies
-├── Dockerfile               # Container definition
-├── baseline/
-│   └── run_baseline.py      # Baseline agent (LLM-powered)
+├── __init__.py            # Package exports
+├── main.py                # FastAPI app + REST API
+├── environment.py         # SQLDebugEnv(Environment) - core RL logic
+├── models.py              # Action, Observation, State (OpenEnv types)
+├── client.py              # SQLDebugEnv(EnvClient) - SDK client
+├── grader.py              # Episode grading logic
+├── openenv.yaml           # OpenEnv manifest
+├── pyproject.toml         # Package configuration
+├── requirements.txt       # Dependencies
+├── Dockerfile             # Container image
+├── inference.py           # Baseline inference script
+├── final_check.py         # Submission validation
+├── server/
+│   ├── app.py             # OpenEnv create_fastapi_app entry
+│   └── api.py             # Alternative entry point
 ├── tasks/
-│   ├── task_easy.py         # Syntax error task (employees.db)
-│   ├── task_medium.py       # JOIN logic task (ecommerce.db)
-│   └── task_hard.py         # 9 randomised hard scenarios (analytics.db)
-├── databases/
-│   ├── employees.db         # 7 employee records
-│   ├── ecommerce.db         # ecommerce schema
-│   └── analytics.db         # 100k+ sales rows
-└── server/
-    └── app.py               # Server entry point
+│   ├── task_easy.py       # 11 syntax error scenarios
+│   ├── task_medium.py     # 9 JOIN logic scenarios
+│   ├── task_hard.py       # 9 CTE/subquery scenarios
+│   └── task_security.py   # 5 SQL injection scenarios
+├── baseline/
+│   └── run_baseline.py    # LLM baseline agent
+├── databases/             # SQLite databases (auto-generated)
+└── outputs/
+    └── trajectories/      # Episode replay logs (JSON)
 ```
 
 ---
 
-## 🔧 Environment Variables
+## 👥 Team
 
-| Variable         | Description                    | Used By                  |
-| ---------------- | ------------------------------ | ------------------------ |
-| `HF_TOKEN`       | Hugging Face / API key         | inference.py             |
-| `API_BASE_URL`   | LLM API endpoint               | inference.py             |
-| `MODEL_NAME`     | Model identifier for inference | inference.py             |
-| `GROQ_API_KEY`   | Groq API key (free tier)       | baseline/run_baseline.py |
-| `OPENAI_API_KEY` | OpenAI API key (fallback)      | baseline/run_baseline.py |
-| `SERVER_URL`     | Environment server URL         | baseline/run_baseline.py |
+- **Aarush** — Core environment & API
+- **Chetanya** — Task design & grading
+- **Aryan** — Deployment & baseline agent
+
+Built for the **OpenEnv Hackathon** by Meta × Hugging Face × Scaler School of Technology.
 
 ---
 
-## 🔌 MCP Support
+## 📜 License
 
-This environment supports the **Model Context Protocol (MCP)** via the `/mcp` endpoint, allowing direct integration with MCP-compatible AI agent frameworks:
-
-```json
-POST /mcp
-{
-  "jsonrpc": "2.0",
-  "method": "tools/call",
-  "params": {
-    "name": "reset",
-    "arguments": { "task_id": "hard", "session_id": "my-session" }
-  }
-}
-```
-
----
-
-## 👥 Authors
-
-Built by **Aarush, Chetanya & Aryan** for the OpenEnv Hackathon by Meta × Hugging Face × Scalar School of Technology.
+MIT License

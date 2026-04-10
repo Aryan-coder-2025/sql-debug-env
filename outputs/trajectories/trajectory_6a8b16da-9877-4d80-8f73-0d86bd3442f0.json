@@ -1,0 +1,26 @@
+{
+  "episode_id": "6a8b16da-9877-4d80-8f73-0d86bd3442f0",
+  "task_id": "easy",
+  "total_steps": 1,
+  "cumulative_reward": 0.85,
+  "history": [
+    {
+      "step": 1,
+      "action": {
+        "metadata": {},
+        "type": "run_sql",
+        "sql": "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name",
+        "reasoning": "fixed"
+      },
+      "reward": {
+        "step_reward": 0.85,
+        "cumulative_reward": 0.85,
+        "correctness": 1.0,
+        "performance": 1.2694
+      },
+      "done": true,
+      "timestamp": "2026-04-10T18:34:43.083809+00:00"
+    }
+  ],
+  "timestamp": "2026-04-10T18:34:43.083809+00:00"
+}

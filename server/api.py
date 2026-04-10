@@ -1,17 +1,17 @@
+"""
+server/api.py — Alternative entry point for the SQL Debug Environment.
+OpenEnv Hackathon by Meta × Hugging Face × Scaler School of Technology
+
+Re-exports the main FastAPI app for backward compatibility with
+deployment configurations that reference server.api:app.
+"""
+
 import sys
 import os
 
-# Ensure parent directory is on path so we can import main
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-def main():
-    """Entry point for multi-node deployment."""
-    import uvicorn
-    from main import app
-
-    uvicorn.run(app, host="0.0.0.0", port=7860)
-
+from main import app, main  # noqa: F401
 
 if __name__ == "__main__":
     main()

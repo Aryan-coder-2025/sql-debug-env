@@ -1,14 +1,17 @@
 name: sql-debug-env
 version: "1.0.0"
 description: >
-  A real-world environment for training and evaluating AI agents
-  on SQL debugging and optimization tasks.
+  A real-world RL environment for training and evaluating AI agents
+  on SQL debugging and optimization tasks. Supports 4 difficulty levels,
+  34+ randomized scenarios, concurrent sessions, and trajectory replay.
 
 tags:
   - sql
   - databases
   - debugging
+  - security
   - openenv
+  - reinforcement-learning
 
 tasks:
   - id: easy
@@ -26,10 +29,14 @@ tasks:
     difficulty: hard
     max_steps: 10
     reward_range: [0.0, 1.0]
+  - id: security
+    name: Security vulnerability fix
+    difficulty: hard
+    max_steps: 10
+    reward_range: [0.0, 1.0]
 
 server:
-  entry_point: main:main
-  module: server.api:main
+  entry_point: server.app:main
 
 endpoints:
   reset: POST /reset
@@ -38,3 +45,5 @@ endpoints:
   tasks: GET /tasks
   grader: GET /grader
   baseline: GET /baseline
+  metrics: GET /metrics
+  websocket: WS /ws

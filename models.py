@@ -1,197 +1,150 @@
-import sqlite3
-import time
-import logging
-import re
-from typing import Optional, List, Dict, Any, Literal, Tuple
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+"""
+models.py — SQL Debug Environment
+OpenEnv Hackathon by Meta × Hugging Face × Scaler School of Technology
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+Defines the core data models for the SQL debugging RL environment.
+All models follow the OpenEnv framework conventions with Pydantic validation.
+"""
+
+from typing import Optional, List, Dict, Any, Literal
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from openenv.core.env_server import (
+    Action as OpenEnvAction,
+    Observation as OpenEnvObservation,
+    State as OpenEnvState,
+)
 
 
-class Action(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    type: Literal["run_sql", "fix_query", "analyze"]
-    sql: Optional[str] = Field(default=None, max_length=10000)
-    reasoning: Optional[str] = Field(default=None, max_length=2000)
+# =============================================================================
+# Action — What the agent sends to the environment
+# =============================================================================
 
 
-class Observation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    task_id: str
-    broken_query: str
-    db_schema: str
-    query_result: Optional[List[Dict[str, Any]]] = None
-    error_message: Optional[str] = None
-    step_count: int
-    done: bool
+class SQLAction(OpenEnvAction):
+    """An action submitted by the agent to debug a SQL query.
+
+    The agent can run SQL queries, submit fixes, or analyze the schema.
+    Each action includes an optional reasoning field for interpretability.
+    """
+
+    type: Literal["run_sql", "fix_query", "analyze"] = Field(
+        description="The type of action: run_sql (execute), fix_query (submit fix), analyze (inspect schema)"
+    )
+    sql: Optional[str] = Field(
+        default=None,
+        max_length=10000,
+        description="The SQL query to execute or the proposed fix",
+    )
+    reasoning: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        description="Agent's reasoning about why this query should work",
+    )
+
+
+# =============================================================================
+# Observation — What the environment returns to the agent
+# =============================================================================
+
+
+class SQLObservation(OpenEnvObservation):
+    """An observation returned by the environment after a step or reset.
+
+    Contains the task context (broken query, schema), the result of the
+    agent's last query execution, and episode progress metadata.
+    """
+
+    task_id: str = Field(description="Current task identifier (easy/medium/hard)")
+    broken_query: str = Field(description="The original broken SQL query to fix")
+    db_schema: str = Field(description="The database schema as CREATE TABLE statements")
+    query_result: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Result rows from the last executed query"
+    )
+    error_message: Optional[str] = Field(
+        default=None, description="Error message if the last query failed"
+    )
+    hint: Optional[str] = Field(
+        default=None, description="Optional hint from the environment (e.g., EXPLAIN output)"
+    )
+    step_count: int = Field(default=0, description="Number of steps taken so far")
+    # done and reward are inherited from OpenEnvObservation
+
+
+# =============================================================================
+# State — Internal episode state exposed via /state
+# =============================================================================
+
+
+class SQLState(OpenEnvState):
+    """Internal state of the SQL debug environment session.
+
+    Provides episode-level metadata for observability and debugging.
+    Extends OpenEnv's base State with SQL-specific fields.
+    """
+
+    task_id: Optional[str] = Field(
+        default=None, description="Active task identifier"
+    )
+    max_steps: int = Field(default=10, description="Maximum steps per episode")
+    cumulative_reward: float = Field(
+        default=0.0, description="Total reward accumulated this episode"
+    )
+    history_length: int = Field(
+        default=0, description="Number of steps recorded in history"
+    )
+
+
+# =============================================================================
+# Reward — Detailed reward breakdown (used internally, not an OpenEnv type)
+# =============================================================================
 
 
 class Reward(BaseModel):
+    """Detailed reward breakdown for a single step.
+
+    Provides fine-grained reward signals for training:
+    - step_reward: immediate reward for this action
+    - cumulative_reward: total reward across the episode
+    - correctness: how close the result is to expected output (0.0 - 1.0)
+    - performance: query execution time in milliseconds
+    """
+
     model_config = ConfigDict(extra="forbid")
-    step_reward: float
-    cumulative_reward: float
-    correctness: float = Field(..., ge=0.0, le=1.0)
-    performance: Optional[float] = None
+    step_reward: float = Field(description="Reward for this single step")
+    cumulative_reward: float = Field(description="Total reward across all steps")
+    correctness: float = Field(
+        ..., ge=0.0, le=1.0, description="Result correctness score"
+    )
+    performance: Optional[float] = Field(
+        default=None, description="Query execution time in milliseconds"
+    )
 
     @field_validator("cumulative_reward")
-    def validate_reward(cls, v):
+    @classmethod
+    def validate_reward(cls, v: float) -> float:
+        """Ensure cumulative reward stays within reasonable bounds."""
         if not (-1000 <= v <= 1000):
             raise ValueError("cumulative_reward out of bounds")
         return v
 
 
+# =============================================================================
+# TaskInfo — Internal task definition (not exposed to agent)
+# =============================================================================
+
+
 class TaskInfo(BaseModel):
+    """Internal task definition containing the ground truth.
+
+    This model holds the broken query, expected output, and database path.
+    It is NOT sent to the agent — only the observation fields are visible.
+    """
+
     model_config = ConfigDict(extra="forbid")
-    task_id: str
-    broken_query: str
-    schema_sql: str
-    expected_output: List[Dict[str, Any]]
-    db_path: str
-
-
-def normalize_result(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return sorted(rows, key=lambda x: sorted(x.items()))
-
-
-def is_safe_query(sql: str) -> bool:
-    forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER"]
-    sql_upper = sql.upper()
-    return not any(word in sql_upper for word in forbidden)
-
-
-def extract_schema(schema_sql: str) -> Dict[str, List[str]]:
-    tables = {}
-    table_defs = re.findall(
-        r"CREATE TABLE (\w+)\s*\((.*?)\);", schema_sql, re.IGNORECASE | re.DOTALL
+    task_id: str = Field(description="Task identifier (easy/medium/hard)")
+    broken_query: str = Field(description="The deliberately broken SQL query")
+    schema_sql: str = Field(description="Database schema as CREATE TABLE statements")
+    expected_output: List[Dict[str, Any]] = Field(
+        description="Expected correct query result rows"
     )
-
-    for table_name, columns_block in table_defs:
-        columns = []
-        for col in columns_block.split(","):
-            col_name = col.strip().split()[0]
-            columns.append(col_name)
-        tables[table_name.upper()] = columns
-
-    return tables
-
-
-def validate_query(sql: str, schema: Dict[str, List[str]]) -> bool:
-    sql_upper = sql.upper()
-
-    table_valid = any(table in sql_upper for table in schema.keys())
-    if not table_valid:
-        return False
-
-    for table, cols in schema.items():
-        if table in sql_upper:
-            if not any(col.upper() in sql_upper for col in cols):
-                return False
-
-    return True
-
-
-class SQLEnvironment:
-    def __init__(self, task: TaskInfo, max_rows: int = 100):
-        self.task = task
-        self.max_rows = max_rows
-        self.step_count = 0
-        self.cumulative_reward = 0.0
-        self.schema = extract_schema(task.schema_sql)
-
-    def _execute(self, sql: str) -> Tuple[Optional[List[Dict]], Optional[str], float]:
-        start = time.perf_counter()
-
-        if not is_safe_query(sql):
-            return None, "Unsafe query detected", 0.0
-
-        if not validate_query(sql, self.schema):
-            return None, "Schema validation failed", 0.0
-
-        try:
-            db_uri = f"file:{self.task.db_path}?mode=ro"
-
-            with sqlite3.connect(db_uri, uri=True, timeout=2) as conn:
-                cursor = conn.cursor()
-                cursor.execute(sql)
-
-                if cursor.description is None:
-                    return [], None, (time.perf_counter() - start) * 1000
-
-                columns = [c[0] for c in cursor.description]
-                rows = cursor.fetchmany(self.max_rows)
-                result = [dict(zip(columns, r)) for r in rows]
-
-                return result, None, (time.perf_counter() - start) * 1000
-
-        except sqlite3.Error as e:
-            return None, f"SQL Error: {e}", (time.perf_counter() - start) * 1000
-        except Exception as e:
-            return None, f"System Error: {e}", (time.perf_counter() - start) * 1000
-
-    def step(self, action: Action) -> Tuple[Observation, Reward]:
-        self.step_count += 1
-
-        logger.info(f"Step {self.step_count} | Action: {action.type}")
-
-        result, error, exec_time = None, None, 0.0
-
-        if action.sql:
-            result, error, exec_time = self._execute(action.sql)
-
-        done = False
-        correctness = 0.0
-        reward = -1.0
-
-        if error:
-            reward = -10.0
-        elif result is not None:
-            if normalize_result(result) == normalize_result(self.task.expected_output):
-                reward = 100.0
-                correctness = 1.0
-                done = True
-            else:
-                reward = 5.0
-                correctness = 0.5
-
-        self.cumulative_reward += reward
-
-        obs = Observation(
-            task_id=self.task.task_id,
-            broken_query=self.task.broken_query,
-            db_schema=self.task.schema_sql,
-            query_result=result,
-            error_message=error,
-            step_count=self.step_count,
-            done=done,
-        )
-
-        rew = Reward(
-            step_reward=reward,
-            cumulative_reward=self.cumulative_reward,
-            correctness=correctness,
-            performance=exec_time,
-        )
-
-        return obs, rew
-
-
-if __name__ == "__main__":
-    task = TaskInfo(
-        task_id="task-1",
-        broken_query="SELECT * FROM users",
-        schema_sql="CREATE TABLE users (id INTEGER, name TEXT);",
-        expected_output=[{"id": 1, "name": "Alice"}],
-        db_path="test.db",
-    )
-
-    env = SQLEnvironment(task)
-
-    action = Action(
-        type="run_sql", sql="SELECT id, name FROM users WHERE id = 1 LIMIT 1;"
-    )
-
-    obs, rew = env.step(action)
-
-    print(obs)
-    print(rew)
+    db_path: str = Field(description="Path to the SQLite database file")
