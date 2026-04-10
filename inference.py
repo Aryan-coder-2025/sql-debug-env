@@ -11,6 +11,7 @@ STDOUT FORMAT (strictly followed):
 import os
 import json
 import time
+import uuid
 from typing import List, Optional
 import httpx
 from openai import OpenAI
@@ -134,11 +135,12 @@ def run_task(task_id: str) -> float:
     score = 0.0
     success = False
 
+    session_id = f"eval_{uuid.uuid4().hex[:8]}"
     log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
 
     try:
         # reset
-        r = httpx.post(f"{SERVER_URL}/reset", json={"task_id": task_id}, timeout=30)
+        r = httpx.post(f"{SERVER_URL}/reset", json={"task_id": task_id, "session_id": session_id}, timeout=30)
         if r.status_code != 200:
             log_end(success=False, steps=0, score=0.01, rewards=[])
             return 0.01
@@ -151,6 +153,7 @@ def run_task(task_id: str) -> float:
                 break
 
             action = get_action(client, obs, history)
+            action["session_id"] = session_id
             action_str = json.dumps(action, separators=(",", ":"))
 
             step_r = httpx.post(f"{SERVER_URL}/step", json=action, timeout=60)
@@ -196,7 +199,7 @@ def run_task(task_id: str) -> float:
                 done = True
 
         # get final grader score
-        grader_r = httpx.get(f"{SERVER_URL}/grader", timeout=30)
+        grader_r = httpx.get(f"{SERVER_URL}/grader", params={"session_id": session_id}, timeout=30)
         if grader_r.status_code == 200:
             score = float(grader_r.json().get("score", 0.01))
         else:
@@ -206,7 +209,6 @@ def run_task(task_id: str) -> float:
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     except Exception as exc:
-        print(f"[DEBUG] Task {task_id} error: {exc}", flush=True)
         score = 0.01
         success = False
 
@@ -220,17 +222,9 @@ def run_task(task_id: str) -> float:
 
 
 def main() -> None:
-    print(f"[DEBUG] model={MODEL_NAME} server={SERVER_URL}", flush=True)
-
     results = {}
     for task_id in ["easy", "medium", "hard"]:
-        print(f"\n[DEBUG] Starting task: {task_id}", flush=True)
         results[task_id] = run_task(task_id)
-
-    print("\n[DEBUG] === Final Scores ===", flush=True)
-    for task_id, score in results.items():
-        bar = "█" * int(score * 20)
-        print(f"[DEBUG]   {task_id:<10} {score:.4f}  {bar}", flush=True)
 
 
 if __name__ == "__main__":
