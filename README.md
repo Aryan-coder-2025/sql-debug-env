@@ -121,6 +121,16 @@ pip install streamlit pandas plotly sqlglot openai faker
 streamlit run dashboard.py
 ```
 
+#### 🖥️ Understanding the Dashboard UI
+Once the dashboard opens at `http://localhost:8501`, here is how to use it:
+1. **Start Debugging (Upload & Initialize)**: Clicking this generates a brand new randomized SQLite database and creates a synthetic "Buggy Query" for the agent to fix. The loading time is instantaneous.
+2. **Agent Internal Reasoning**: Shows the raw thoughts of the LLM before it executes a command.
+3. **Session History Log**: Shows the step-by-step history of commands the agent executed (e.g. `EXPLAIN SELECT...` or `DESCRIBE users`) and the exact feedback the environment returned.
+4. **Reward Accumulation**: Tracks the agent's reinforcement learning score. The agent gets `+0.1` for analyzing the db, `+1.0` for a correct fix, `-0.05` for syntax errors, and `+/- 0.1` for algorithmic query efficiency (penalized for Table Scans, rewarded for Indexes).
+5. **Control Panel**:
+    - **Step Agent**: Forces the LLM Agent to take exactly *one* debugging action so you can watch its thought process manually.
+    - **Run to Fix**: The LLM Agent will repeatedly take steps automatically in a loop until it finds the correct answer and submits it.
+
 ### 3. Run the Genetic Adversarial Generator
 
 Watch a self-improving loop of mutated SQL bugs compete against the LLM Agent:
