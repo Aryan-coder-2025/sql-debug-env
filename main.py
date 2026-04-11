@@ -12,6 +12,14 @@ Custom HTTP endpoints are added for the REST API used by agents.
 
 import os
 import uuid
+
+# Load .env file for local development (GROQ_API_KEY, etc.)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; env vars must be set externally
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,6 +28,10 @@ from openenv.core.env_server import HTTPEnvServer
 from models import SQLAction, SQLObservation
 from environment import SQLDebugEnv, get_metrics
 from grader import grade_episode
+from tasks.task_easy import EASY_SCENARIOS
+from tasks.task_medium import MEDIUM_SCENARIOS
+from tasks.task_hard import HARD_SCENARIOS
+from tasks.task_security import SECURITY_SCENARIOS
 
 # =============================================================================
 # Create FastAPI app with OpenEnv server for WebSocket support
@@ -136,6 +148,8 @@ def root():
             "validate": "GET  /validate",
             "metrics": "GET  /metrics",
             "trajectories": "GET  /trajectories",
+            "trajectory": "GET  /trajectory/{episode_id}",
+            "leaderboard": "GET  /leaderboard",
             "websocket": "WS   /ws",
             "docs": "GET  /docs",
         },
@@ -171,14 +185,32 @@ def info():
 
 @app.get("/validate")
 def validate():
-    """Self-validation against the OpenEnv specification."""
+    """Self-validation against the OpenEnv specification with live checks."""
     checks = {}
     checks["health_endpoint"] = True
     routes = [r.path for r in app.routes]
     required = ["/reset", "/step", "/state", "/tasks", "/grader", "/baseline"]
     checks["required_endpoints"] = all(r in routes for r in required)
     checks["openenv_yaml"] = os.path.exists("openenv.yaml")
-    checks["min_4_tasks"] = True
+
+    # Live scenario registry counts
+    scenario_counts = {
+        "easy": len(EASY_SCENARIOS),
+        "medium": len(MEDIUM_SCENARIOS),
+        "hard": len(HARD_SCENARIOS),
+        "security": len(SECURITY_SCENARIOS),
+    }
+    total_scenarios = sum(scenario_counts.values())
+    checks["min_4_tasks"] = len(scenario_counts) >= 4
+    checks["min_30_scenarios"] = total_scenarios >= 30
+
+    # Live database file checks
+    db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases")
+    db_files = ["employees.db", "ecommerce.db", "analytics.db"]
+    checks["databases_exist"] = all(
+        os.path.exists(os.path.join(db_dir, f)) for f in db_files
+    )
+
     checks["environment_initialized"] = True
     checks["typed_models"] = True
     checks["reward_range"] = True
@@ -192,7 +224,9 @@ def validate():
         "version": "1.0.0",
         "checks": checks,
         "summary": "All checks passed" if all_passed else "Some checks failed",
-        "tasks": ["easy", "medium", "hard", "security"],
+        "tasks": list(scenario_counts.keys()),
+        "total_scenarios": total_scenarios,
+        "scenario_counts": scenario_counts,
         "reward_range": [0.0, 1.0],
         "action_types": ["run_sql", "fix_query", "analyze"],
         "session_support": True,
@@ -317,7 +351,7 @@ def get_state(session_id: str = None):
 
 @app.get("/tasks")
 def list_tasks():
-    """List all available tasks with their schemas."""
+    """List all available tasks with their schemas and live scenario counts."""
     return {
         "tasks": [
             {
@@ -325,7 +359,8 @@ def list_tasks():
                 "name": "Syntax repair",
                 "difficulty": "easy",
                 "description": "Fix a syntax error in a SQL query",
-                "scenarios": 11,
+                "scenarios": len(EASY_SCENARIOS),
+                "scenario_names": [s["name"] for s in EASY_SCENARIOS],
                 "action_schema": SQLAction.model_json_schema(),
             },
             {
@@ -333,7 +368,8 @@ def list_tasks():
                 "name": "Join logic fix",
                 "difficulty": "medium",
                 "description": "Fix wrong JOIN type causing missing rows",
-                "scenarios": 9,
+                "scenarios": len(MEDIUM_SCENARIOS),
+                "scenario_names": [s["name"] for s in MEDIUM_SCENARIOS],
                 "action_schema": SQLAction.model_json_schema(),
             },
             {
@@ -341,7 +377,8 @@ def list_tasks():
                 "name": "Performance optimization",
                 "difficulty": "hard",
                 "description": "Fix correlated subquery logic error and optimize",
-                "scenarios": 9,
+                "scenarios": len(HARD_SCENARIOS),
+                "scenario_names": [s["name"] for s in HARD_SCENARIOS],
                 "action_schema": SQLAction.model_json_schema(),
             },
             {
@@ -349,7 +386,8 @@ def list_tasks():
                 "name": "Security vulnerability fix",
                 "difficulty": "hard",
                 "description": "Identify and fix SQL injection / data leak vulnerabilities",
-                "scenarios": 5,
+                "scenarios": len(SECURITY_SCENARIOS),
+                "scenario_names": [s["name"] for s in SECURITY_SCENARIOS],
                 "action_schema": SQLAction.model_json_schema(),
             },
         ]
@@ -367,7 +405,7 @@ def grader(session_id: str = None):
 
 
 @app.get("/baseline")
-def baseline():
+async def baseline():
     """Run the baseline LLM agent on all tasks and return scores."""
     try:
         hf_space_host = os.environ.get("SPACE_HOST", "")
@@ -375,7 +413,7 @@ def baseline():
             os.environ["SERVER_URL"] = f"https://{hf_space_host}"
         from baseline.run_baseline import run_all_tasks
 
-        return run_all_tasks()
+        return await run_all_tasks()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -410,6 +448,91 @@ def trajectories():
         "trajectories": [os.path.basename(f) for f in sorted(files)[-50:]],
         "count": len(files),
         "directory": traj_dir,
+    }
+
+
+@app.get("/trajectory/{episode_id}")
+def get_trajectory(episode_id: str):
+    """Retrieve a specific trajectory by episode ID for replay and inspection."""
+    import json as _json
+
+    traj_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "outputs", "trajectories"
+    )
+    filepath = os.path.join(traj_dir, f"trajectory_{episode_id}.json")
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"Trajectory not found: {episode_id}")
+    try:
+        with open(filepath, "r") as f:
+            return _json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/leaderboard")
+def leaderboard():
+    """Aggregated performance leaderboard across all recorded episodes.
+
+    Provides per-task breakdown and overall statistics from trajectory history.
+    Useful for judges to see cumulative agent performance at a glance.
+    """
+    import glob
+    import json as _json
+
+    traj_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "outputs", "trajectories"
+    )
+    if not os.path.exists(traj_dir):
+        return {"entries": [], "summary": {"total_episodes": 0}}
+
+    files = glob.glob(os.path.join(traj_dir, "trajectory_*.json"))
+    task_stats: dict = {}  # task_id -> {scores, steps, count, successes}
+
+    for fpath in files:
+        try:
+            with open(fpath, "r") as f:
+                data = _json.load(f)
+            tid = data.get("task_id", "unknown")
+            if tid not in task_stats:
+                task_stats[tid] = {"scores": [], "steps": [], "count": 0, "successes": 0}
+            stats = task_stats[tid]
+            stats["count"] += 1
+            stats["steps"].append(data.get("total_steps", 0))
+
+            # Derive best correctness from history
+            best_c = 0.0
+            for step in data.get("history", []):
+                c = float(step.get("reward", {}).get("correctness", 0.0))
+                if c > best_c:
+                    best_c = c
+            stats["scores"].append(best_c)
+            if best_c >= 1.0:
+                stats["successes"] += 1
+        except Exception:
+            continue
+
+    entries = []
+    for tid, stats in sorted(task_stats.items()):
+        avg_score = sum(stats["scores"]) / max(1, len(stats["scores"]))
+        avg_steps = sum(stats["steps"]) / max(1, len(stats["steps"]))
+        entries.append({
+            "task_id": tid,
+            "episodes": stats["count"],
+            "successes": stats["successes"],
+            "success_rate": round(stats["successes"] / max(1, stats["count"]), 4),
+            "avg_correctness": round(avg_score, 4),
+            "avg_steps": round(avg_steps, 2),
+        })
+
+    total_eps = sum(e["episodes"] for e in entries)
+    total_success = sum(e["successes"] for e in entries)
+    return {
+        "entries": entries,
+        "summary": {
+            "total_episodes": total_eps,
+            "total_successes": total_success,
+            "overall_success_rate": round(total_success / max(1, total_eps), 4),
+        },
     }
 
 

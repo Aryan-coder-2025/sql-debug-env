@@ -26,4 +26,8 @@ name = "sql-debug-env"
 version = "1.0.0"
 
 [tool.pyright]
+pythonVersion = "3.12"
 extraPaths = ["."]
+executionEnvironments = [
+    { root = ".", extraPaths = ["."] }
+]
