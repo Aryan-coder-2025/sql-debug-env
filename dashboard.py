@@ -87,19 +87,13 @@ with st.sidebar:
     st.header("1. Upload & Initialize")
     uploaded_file = st.file_uploader("Upload Buggy .sql", type=['sql'])
     
-    if st.button("Start Debugging", type="primary"):
-        # Initialize Backend Environments
+    def initialize_session():
+        """Initialize a new debugging session."""
         base_env = DynamicSQLEnv()
-        
-        # If user uploaded a buggy query, we could theoretically inject it here,
-        # but the DynamicSQLEnv generates its own random task anyway per the spec.
-        # We will use the backend's generated query to maintain isolation.
-        
         st.session_state.env = MultiStepSQLEnv(base_env, max_steps=15)
         
-        # Reset Env for new session
         obs = st.session_state.env.reset()
-        if isinstance(obs, tuple): # Handle Gym compatibility
+        if isinstance(obs, tuple):
             obs = obs[0]
             
         st.session_state.obs = obs
@@ -109,6 +103,45 @@ with st.sidebar:
         st.session_state.reward_history = []
         st.session_state.action_history = []
         st.session_state.feedback = "Session started. Ready for the agent."
+    
+    def run_agent_loop():
+        """Auto-run the agent until it fixes the query or times out."""
+        if not st.session_state.env:
+            return
+        for _ in range(15):
+            if st.session_state.done:
+                break
+            action = st.session_state.agent.get_action(st.session_state.obs)
+            if action.startswith("SUBMIT_QUERY"):
+                st.session_state.current_proposal = action.replace("SUBMIT_QUERY", "").strip()
+            step_result = st.session_state.env.step(action)
+            if len(step_result) == 4:
+                obs, reward, done, info = step_result
+            else:
+                obs, reward, done, truncated, info = step_result
+                done = done or truncated
+            feedback = info.get("feedback", "")
+            st.session_state.obs = obs
+            st.session_state.done = done
+            st.session_state.feedback = feedback
+            st.session_state.reward_history.append(reward)
+            monologue = generate_monologue(action, feedback)
+            st.session_state.action_history.append({
+                "Action": action,
+                "Reward": reward,
+                "Reasoning": monologue
+            })
+    
+    # Auto-initialize and auto-run on first page load
+    if "auto_started" not in st.session_state:
+        st.session_state.auto_started = True
+        initialize_session()
+        run_agent_loop()
+    
+    if st.button("Start Debugging", type="primary"):
+        initialize_session()
+        run_agent_loop()
+        st.rerun()
         
     st.divider()
     st.header("2. Control Panel")
