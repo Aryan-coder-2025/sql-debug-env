@@ -176,6 +176,27 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
         if not self.current_task:
             raise ValueError("Call reset() before step()")
 
+        # Guard: prevent steps after episode is already done
+        if self.step_count >= self.max_steps:
+            task = self.current_task
+            return SQLObservation(
+                task_id=task.task_id,
+                broken_query=task.broken_query,
+                db_schema=task.schema_sql,
+                query_result=None,
+                error_message="Episode already finished. Call reset() to start a new episode.",
+                hint=None,
+                step_count=self.step_count,
+                done=True,
+                reward=0.0,
+                metadata={
+                    "correctness": 0.0,
+                    "cumulative_reward": self.cumulative_reward,
+                    "performance_ms": 0.0,
+                    "episode_id": self._episode_id,
+                },
+            )
+
         self.step_count += 1
         _metrics["total_steps"] += 1
         task = self.current_task

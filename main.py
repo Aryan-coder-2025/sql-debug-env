@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from openenv.core.env_server import HTTPEnvServer
 from models import SQLAction, SQLObservation
 from environment import SQLDebugEnv, get_metrics
+from multi_step_env import MultiStepSQLEnv
 from grader import grade_episode
 from tasks.task_easy import EASY_SCENARIOS
 from tasks.task_medium import MEDIUM_SCENARIOS
@@ -76,19 +77,14 @@ app.routes[:] = [
 # Session-based environments for backward-compatible HTTP API
 # =============================================================================
 
-sessions: dict = {}
+sessions: dict = {}          # session_id -> SQLDebugEnv (base)
+multi_sessions: dict = {}    # session_id -> MultiStepSQLEnv (wrapper)
 default_env = SQLDebugEnv()
+default_multi = MultiStepSQLEnv(default_env, max_steps=10)
 
 
 def get_env(session_id: str = None) -> SQLDebugEnv:
-    """Get or create an environment instance for the given session.
-
-    Args:
-        session_id: Optional session identifier for isolation.
-
-    Returns:
-        SQLDebugEnv instance for the session.
-    """
+    """Get or create a base environment instance for the given session."""
     if not session_id:
         return default_env
     if session_id not in sessions:
@@ -96,12 +92,27 @@ def get_env(session_id: str = None) -> SQLDebugEnv:
     return sessions[session_id]
 
 
+def get_multi_env(session_id: str = None) -> MultiStepSQLEnv:
+    """Get or create a multi-step environment wrapper for the given session.
+
+    This exposes SHOW_TABLES, DESCRIBE, EXPLAIN, SUBMIT_QUERY commands
+    with exploration rewards and fractional scoring through the REST API.
+    """
+    if not session_id:
+        return default_multi
+    if session_id not in multi_sessions:
+        base = get_env(session_id)
+        multi_sessions[session_id] = MultiStepSQLEnv(base, max_steps=10)
+    return multi_sessions[session_id]
+
+
 def cleanup_sessions():
     """Evict oldest sessions when capacity is exceeded."""
     if len(sessions) > 100:
         oldest = list(sessions.keys())[:50]
         for key in oldest:
-            del sessions[key]
+            sessions.pop(key, None)
+            multi_sessions.pop(key, None)
 
 
 # =============================================================================
@@ -228,7 +239,7 @@ def validate():
         "total_scenarios": total_scenarios,
         "scenario_counts": scenario_counts,
         "reward_range": [0.0, 1.0],
-        "action_types": ["run_sql", "fix_query", "analyze"],
+        "action_types": ["run_sql", "fix_query", "analyze", "SHOW_TABLES", "DESCRIBE", "EXPLAIN", "SUBMIT_QUERY", "GIVE_UP"],
         "session_support": True,
         "websocket_support": True,
     }
@@ -265,6 +276,11 @@ async def reset_env(request: Request):
 
         env = get_env(session_id)
         obs = env.reset(task_id=task_id)
+
+        # Also reset the multi-step wrapper so /step commands work
+        multi = get_multi_env(session_id)
+        multi.reset(task_id=task_id)
+
         return obs.model_dump()
     except HTTPException:
         raise
@@ -276,21 +292,72 @@ async def reset_env(request: Request):
 async def step_env(request: Request):
     """Submit a SQL action to the environment.
 
-    Accepts JSON body with fields:
-    - type: 'run_sql', 'fix_query', or 'analyze'
-    - sql: the SQL query string
-    - reasoning: optional explanation
-    - session_id: optional session identifier
+    Supports TWO modes:
+
+    Mode 1 — Multi-step commands (recommended):
+      - command: 'SHOW_TABLES', 'DESCRIBE <table>', 'EXPLAIN <sql>',
+                 'SUBMIT_QUERY <sql>', 'GIVE_UP'
+      Provides exploration rewards and fractional scoring.
+
+    Mode 2 — Legacy SQLAction (backward-compatible):
+      - type: 'run_sql', 'fix_query', or 'analyze'
+      - sql: the SQL query string
+
+    Both modes accept:
+      - session_id: optional session identifier
+      - reasoning: optional explanation
     """
     try:
         body = await request.json()
-        session_id = body.pop("session_id", None)
+        session_id = body.get("session_id")
+        command = body.get("command", "").strip()
+        sql = body.get("sql", "").strip()
+
+        # ─── Mode 1: Multi-step command (SHOW_TABLES, DESCRIBE, EXPLAIN, etc.) ───
+        if command:
+            multi = get_multi_env(session_id)
+            if not multi.base_env.current_task:
+                multi.reset(task_id="easy")
+
+            result = multi.step(command)
+            if len(result) == 5:
+                obs, reward, done, truncated, info = result
+            else:
+                obs, reward, done, info = result
+
+            base_env = multi.base_env
+            return {
+                "observation": {
+                    "task_id": base_env.current_task.task_id if base_env.current_task else None,
+                    "broken_query": obs.get("query", ""),
+                    "db_schema": obs.get("schema_hint", ""),
+                    "query_result": None,
+                    "error_message": None,
+                    "step_count": info.get("step_count", multi.current_step),
+                    "done": done,
+                },
+                "reward": {
+                    "step_reward": round(reward, 4),
+                    "cumulative_reward": round(reward, 4),
+                    "correctness": info.get("correctness", 0.0),
+                    "performance": 0.0,
+                },
+                "done": done,
+                "info": {
+                    "feedback": info.get("feedback", ""),
+                    "action": info.get("action", command),
+                    "mode": "multi_step",
+                    "available_commands": ["SHOW_TABLES", "DESCRIBE <table>", "EXPLAIN <sql>", "SUBMIT_QUERY <sql>", "GIVE_UP"],
+                },
+            }
+
+        # ─── Mode 2: Legacy SQLAction format ───
         env = get_env(session_id)
 
         if not env.current_task:
             env.reset(task_id="easy")
 
-        action = SQLAction(**{k: v for k, v in body.items() if k != "session_id"})
+        action = SQLAction(**{k: v for k, v in body.items() if k not in ("session_id", "command")})
 
         if not action.sql or not action.sql.strip():
             return {
@@ -310,7 +377,7 @@ async def step_env(request: Request):
                     "performance": 0.0,
                 },
                 "done": False,
-                "info": {"error": "empty_sql"},
+                "info": {"error": "empty_sql", "mode": "legacy"},
             }
 
         obs = env.step(action)
@@ -324,7 +391,7 @@ async def step_env(request: Request):
                 "performance": obs_dict.get("metadata", {}).get("performance_ms", 0.0),
             },
             "done": obs_dict.get("done", False),
-            "info": {},
+            "info": {"mode": "legacy"},
         }
     except HTTPException:
         raise
