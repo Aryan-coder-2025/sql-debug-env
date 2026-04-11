@@ -251,6 +251,8 @@ sql-debug-env/
 │   ├── task_medium.py         # 9 medium scenarios (JOIN logic)
 │   ├── task_hard.py           # 9 hard scenarios (subqueries, optimization)
 │   └── task_security.py       # 5 security scenarios (SQL injection, data leaks)
+├── tests/
+│   └── test_environment.py    # 38 automated tests (pytest)
 ├── baseline/
 │   └── run_baseline.py        # Baseline agent benchmark runner
 ├── server/
@@ -259,6 +261,27 @@ sql-debug-env/
 └── outputs/
     └── trajectories/          # Auto-saved episode replay logs (JSON)
 ```
+
+---
+
+## 🧪 Testing
+
+Run the full test suite (38 tests):
+
+```bash
+pip install pytest
+pytest tests/test_environment.py -v
+```
+
+| Category | Tests | Coverage |
+|----------|-------|----------|
+| Environment Reset | 8 | All difficulties, state clearing, invalid task handling |
+| Step Execution | 7 | Correctness scoring, reward signals, max steps timeout |
+| Safety Filter | 10 | Blocks DROP/DELETE/TRUNCATE/UPDATE/INSERT/ALTER/CREATE/ATTACH |
+| Correctness Scoring | 4 | Exact match, partial match, no result, empty result |
+| Grader | 4 | Score clamping, perfect/failed episodes |
+| Dynamic Schema | 4 | DB generation, varied difficulty distribution |
+| Session Isolation | 1 | Concurrent environments don't interfere |
 
 ---
 
