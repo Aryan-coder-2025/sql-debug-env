@@ -285,3 +285,51 @@ class TestSessionIsolation:
         env1.step(SQLAction(type="run_sql", sql="SELECT 1"))
         assert env1.step_count == 1
         assert env2.step_count == 0
+
+# =============================================================================
+# Advanced Hackathon Features Tests
+# =============================================================================
+
+
+class TestAdvancedHackathonFeatures:
+    """Tests for Phase 2/Innovation features (AST Telemetry & Symbolic Validation)."""
+
+    def test_symbolic_pre_validation_rejects_sqlglot_error(self):
+        env = SQLDebugEnv()
+        env.reset(task_id="easy")
+        
+        # Submitting garbled SQL that fails sqlglot parsing instantly
+        obs = env.step(SQLAction(type="run_sql", sql="SELECT * FORUM employees WEIRD BUG"))
+        assert obs.reward < 0.0
+        assert "Symbolic/Syntax error" in obs.error_message
+        assert "SQLGlot Syntax Error" in obs.hint
+        # Execution time should be exactly 0.0 because it never reached SQLite
+        assert obs.metadata.get("performance_ms", -1) == 0.0
+
+    def test_ast_complexity_bonus_in_grader(self):
+        # Mock a history where the agent solved the query flawlessly
+        history = [
+            {
+                "step": 1, 
+                "action": {"sql": "SELECT * FROM employees"}, 
+                "reward": {"correctness": 1.0},
+                "metadata": {"ast_nodes": 15}  # Highly concise query (< 25 nodes = +0.05 bonus)
+            }
+        ]
+        res = grade_episode(history)
+        assert res.get("ast_bonus", 0.0) == 0.05
+        # 1.0 (correct) + 0.1 (efficiency) + 0.05 (ast_bonus)
+        assert res["score"] >= 0.99  # Grader clamps to 0.99
+
+    def test_telemetry_metrics_tracking(self):
+        env = SQLDebugEnv()
+        env.reset(task_id="easy")
+        
+        # A valid query will populate ast properties
+        obs = env.step(SQLAction(type="run_sql", sql="SELECT name FROM employees"))
+        assert obs.metadata.get("ast_nodes", 0) > 0
+        
+        from environment import get_metrics
+        m = get_metrics()
+        assert "avg_ast_complexity" in m
+        assert "avg_execution_ms" in m

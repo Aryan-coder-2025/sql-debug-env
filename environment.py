@@ -16,6 +16,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
+import sqlglot
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -38,6 +39,8 @@ _metrics = {
     "successful_episodes": 0,
     "steps_per_episode": [],
     "scores": [],
+    "ast_complexity_scores": [],
+    "exec_times": [],
 }
 
 
@@ -63,6 +66,12 @@ def get_metrics() -> Dict[str, Any]:
         ),
         "avg_steps_per_episode": round(avg_steps, 2),
         "avg_score": round(avg_score, 4),
+        "avg_ast_complexity": round(
+            sum(_metrics["ast_complexity_scores"]) / max(1, len(_metrics["ast_complexity_scores"])), 2
+        ),
+        "avg_execution_ms": round(
+            sum(_metrics["exec_times"]) / max(1, len(_metrics["exec_times"])), 2
+        ),
     }
 
 
@@ -205,6 +214,18 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
             f"Step {self.step_count} | type={action.type} | sql={str(action.sql)[:80]}"
         )
 
+        ast_nodes_count = 0
+        sql_to_run = action.sql or ""
+        
+        # Symbolic Pre-Validation via sqlglot
+        if sql_to_run.strip():
+            try:
+                parsed_ast = sqlglot.parse_one(sql_to_run, read="sqlite")
+                ast_nodes_count = sum(1 for _ in parsed_ast.walk())
+            except Exception as e:
+                # Instant syntax feedback (Symbolic Hint) without hitting the DB
+                return self._instant_symbolic_rejection(task, sql_to_run, str(e))
+
         # Execute the query
         result, error, exec_time = self._execute_query(action.sql, task.db_path)
 
@@ -239,6 +260,7 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
             "action": action.model_dump(),
             "reward": reward_detail.model_dump(),
             "done": done,
+            "metadata": {"ast_nodes": ast_nodes_count},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -249,6 +271,8 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
         if done:
             _metrics["steps_per_episode"].append(self.step_count)
             _metrics["scores"].append(correctness)
+            _metrics["ast_complexity_scores"].append(ast_nodes_count)
+            _metrics["exec_times"].append(exec_time)
             self._save_trajectory()
 
         logger.info(
@@ -270,6 +294,45 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
                 "correctness": round(correctness, 4),
                 "cumulative_reward": self.cumulative_reward,
                 "performance_ms": round(exec_time, 4),
+                "ast_nodes": ast_nodes_count,
+                "episode_id": self._episode_id,
+            },
+        )
+
+    def _instant_symbolic_rejection(self, task: TaskInfo, sql: str, parse_error: str) -> SQLObservation:
+        """Handle an instant pre-execution block via sqlglot strict parsing."""
+        self.cumulative_reward = round(self.cumulative_reward - 0.05, 4)
+        done = (self.step_count >= self.max_steps)
+        _metrics["exec_times"].append(0.0)
+        
+        step_rec = {
+            "step": self.step_count,
+            "action": {"type": "run_sql", "sql": sql, "reasoning": "symbolic pre-validation"},
+            "reward": {"step_reward": -0.05, "cumulative_reward": self.cumulative_reward, "correctness": 0.0, "performance": 0.0},
+            "done": done,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self.history.append(step_rec)
+        if done:
+            _metrics["steps_per_episode"].append(self.step_count)
+            _metrics["scores"].append(0.0)
+            self._save_trajectory()
+
+        return SQLObservation(
+            task_id=task.task_id,
+            broken_query=task.broken_query,
+            db_schema=task.schema_sql,
+            query_result=None,
+            error_message="Symbolic/Syntax error before execution.",
+            hint=f"SQLGlot Syntax Error: {parse_error}",
+            step_count=self.step_count,
+            done=done,
+            reward=-0.05,
+            metadata={
+                "correctness": 0.0,
+                "cumulative_reward": self.cumulative_reward,
+                "performance_ms": 0.0,
+                "ast_nodes": 0,
                 "episode_id": self._episode_id,
             },
         )

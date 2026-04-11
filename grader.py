@@ -82,8 +82,22 @@ def grade_episode(
         # Empty query penalty: penalize wasted steps
         empty_penalty = round(min(0.1, empty_submissions * 0.02), 4)
 
-        # Final score = correctness + efficiency - penalties, clamped to [0, 1]
-        final_score = correctness + efficiency_bonus - regression_penalty - empty_penalty
+        # SQL Code Golf: AST Complexity Bonus
+        ast_bonus = 0.0
+        if history:
+            last_step = history[-1]
+            reward_data = last_step.get("reward", {})
+            correctness_val = float(reward_data.get("correctness", 0.0))
+            if correctness_val >= 1.0:
+                ast_nodes = int(last_step.get("metadata", {}).get("ast_nodes", 0))
+                # If they solved it cleanly (< 20 nodes is generally excellent for these tasks)
+                if ast_nodes > 0 and ast_nodes < 25:
+                    ast_bonus = 0.05
+                elif ast_nodes > 0 and ast_nodes < 40:
+                    ast_bonus = 0.02
+
+        # Final score = correctness + efficiency + ast_bonus - penalties, clamped to [0, 1]
+        final_score = correctness + efficiency_bonus + ast_bonus - regression_penalty - empty_penalty
         final_score = round(max(0.01, min(0.99, final_score)), 4)
 
         return {
@@ -93,6 +107,7 @@ def grade_episode(
             "last_correctness": round(last_correctness, 4),
             "total_steps": total_steps,
             "efficiency_bonus": efficiency_bonus,
+            "ast_bonus": ast_bonus,
             "regression_penalty": regression_penalty,
             "empty_penalty": empty_penalty,
             "empty_submissions": empty_submissions,

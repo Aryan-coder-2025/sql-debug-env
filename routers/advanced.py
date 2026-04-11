@@ -22,6 +22,28 @@ router = APIRouter()
 def metrics():
     return get_metrics()
 
+@router.get("/telemetry/live")
+def telemetry_live():
+    """Live DevOps Execution Telemetry."""
+    m = get_metrics()
+    return {
+        "status": "online",
+        "avg_execution_ms": m.get("avg_execution_ms", 0.0),
+        "total_queries_executed": m.get("total_steps", 0),
+        "system_health": "optimal" if m.get("avg_execution_ms", 0.0) < 50.0 else "degraded"
+    }
+
+@router.get("/telemetry/ast")
+def telemetry_ast():
+    """SQL Code Golf AST Complexity tracking across all sessions."""
+    m = get_metrics()
+    return {
+        "status": "online",
+        "avg_sql_ast_nodes": m.get("avg_ast_complexity", 0.0),
+        "total_queries_executed": m.get("total_steps", 0),
+        "complexity_rating": "clean" if m.get("avg_ast_complexity", 0.0) < 30.0 else "spaghetti"
+    }
+
 @router.get("/trajectories")
 def trajectories():
     import glob

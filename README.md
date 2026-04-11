@@ -185,6 +185,13 @@ We use three distinct methods to challenge the agents:
 
 ---
 
+## 🚀 Advanced Hackathon Features
+- **SQL Code Golf (AST Complexity Scoring)**: We parse agent submitts via `sqlglot` to calculate Abstract Syntax Tree (AST) node depth. Agents that solve queries elegantly (concisely) receive up to a +0.05 reward bonus, actively punishing bloat and spaghetti SQL.
+- **Symbolic Pre-Validation**: The environment parses queries internally *before* querying SQLite. Malformed schemas get instant fractional penalties without waiting for sluggish DB operational errors.
+- **Real-time DevOps Telemetry API**: Using `/telemetry/live` and `/telemetry/ast` endpoints, judges can monitor avg execution times globally alongside median query complexity profiles!
+
+---
+
 ## 📊 Reward Structure
 
 ### Core Environment Rewards (`environment.py`)
