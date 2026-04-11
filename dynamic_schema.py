@@ -174,38 +174,116 @@ class DynamicSQLEnv(SQLDebugEnv):
     
     def _load_task(self, task_id: str, scenario: str = None) -> TaskInfo:
         """
-        Overrides the static task loader to generate a dynamic schema and 
-        a synthetic broken query for the agent to fix.
+        Overrides the static task loader to generate a dynamic schema and
+        a synthetic broken query with varied difficulty mutations.
+        
+        Difficulty is randomly selected to produce a mix of easy (1-2 step), 
+        medium (3-5 step), and hard (5-10 step) debugging sessions.
         """
-        # Generate new DB
-        db_path, schema_str, tables = generate_random_schema()
+        # Generate new DB with at least 2 tables for JOIN-based bugs
+        db_path, schema_str, tables = generate_random_schema(num_tables=(2, 4))
         
-        # Pick a random table
-        target_table = random.choice(tables)
+        # Pick primary and secondary tables
+        target_table = tables[0]
         t_name = target_table["name"]
+        all_cols = target_table["columns"]
+        non_id_cols = [c for c in all_cols if c["name"] != "id"]
         
-        # Generate a naive synthetic task:
-        # Give the agent a query with a syntax typo.
-        # Ensure at least 1 column
-        if len(target_table["columns"]) > 1:
-            query_col = target_table["columns"][1]["name"]
+        # Pick query column(s)
+        if len(non_id_cols) >= 2:
+            col1 = non_id_cols[0]["name"]
+            col2 = non_id_cols[1]["name"]
+        elif len(non_id_cols) == 1:
+            col1 = non_id_cols[0]["name"]
+            col2 = "id"
         else:
-            query_col = "id"
-            
-        correct_query = f"SELECT {query_col} FROM {t_name} ORDER BY id LIMIT 10"
+            col1 = "id"
+            col2 = "id"
         
-        # Determine the exact expected output from the new DB
+        # Randomly pick difficulty tier with weighted distribution
+        # 30% easy, 40% medium, 30% hard
+        difficulty = random.choices(
+            ["easy", "medium", "hard"],
+            weights=[30, 40, 30],
+            k=1
+        )[0]
+        
+        # =====================================================================
+        # EASY MUTATIONS: Syntax errors the agent can spot immediately
+        # Agent needs 1-2 steps, mostly just reading the query carefully
+        # =====================================================================
+        if difficulty == "easy":
+            correct_query = f"SELECT {col1} FROM {t_name} ORDER BY id LIMIT 10"
+            mutation = random.choice([
+                # 1. Missing FROM keyword
+                f"SELECT {col1} RETRIEVE_FROM {t_name} LIMIT 10",
+                # 2. Typo in SELECT
+                f"SELCT {col1} FROM {t_name} ORDER BY id LIMIT 10",
+                # 3. Wrong keyword ORDER
+                f"SELECT {col1} FROM {t_name} ORDERD BY id LIMIT 10",
+                # 4. Missing closing quote in string literal
+                f"SELECT {col1} FROM {t_name} WHERE {col1} = 'test ORDER BY id LIMIT 10",
+                # 5. Double comma in column list
+                f"SELECT {col1},, {col2} FROM {t_name} ORDER BY id LIMIT 10",
+            ])
+            broken_query = mutation
+        
+        # =====================================================================
+        # MEDIUM MUTATIONS: Schema/logic errors requiring investigation
+        # Agent needs to DESCRIBE tables and check column names (3-5 steps)
+        # =====================================================================
+        elif difficulty == "medium":
+            correct_query = f"SELECT {col1}, {col2} FROM {t_name} WHERE id > 0 ORDER BY id LIMIT 10"
+            mutation = random.choice([
+                # 1. Wrong column name (agent must DESCRIBE to find the right one)
+                f"SELECT nonexistent_column, {col2} FROM {t_name} WHERE id > 0 ORDER BY id LIMIT 10",
+                # 2. Wrong table name (agent must SHOW_TABLES to find the right one)
+                f"SELECT {col1}, {col2} FROM wrong_table_name WHERE id > 0 ORDER BY id LIMIT 10",
+                # 3. Missing WHERE column (plausible but wrong)
+                f"SELECT {col1}, {col2} FROM {t_name} WHERE fake_status = 'active' ORDER BY id LIMIT 10",
+                # 4. Using * but with a non-existent alias
+                f"SELECT t.{col1}, t.{col2} FROM {t_name} AS x WHERE x.id > 0 ORDER BY x.id LIMIT 10",
+                # 5. Wrong column in ORDER BY
+                f"SELECT {col1}, {col2} FROM {t_name} WHERE id > 0 ORDER BY missing_col LIMIT 10",
+            ])
+            broken_query = mutation
+        
+        # =====================================================================
+        # HARD MUTATIONS: Multi-table / logic errors requiring deep analysis
+        # Agent needs SHOW_TABLES + DESCRIBE + EXPLAIN (5-10 steps)
+        # =====================================================================
+        else:  # hard
+            second_table = tables[1] if len(tables) > 1 else tables[0]
+            t2_name = second_table["name"]
+            t2_cols = [c for c in second_table["columns"] if c["name"] != "id"]
+            t2_col = t2_cols[0]["name"] if t2_cols else "id"
+            
+            correct_query = f"SELECT {col1}, {col2} FROM {t_name} WHERE id > 0 ORDER BY id LIMIT 10"
+            mutation = random.choice([
+                # 1. Broken JOIN with wrong ON clause
+                f"SELECT a.{col1}, b.{t2_col} FROM {t_name} a JOIN {t2_name} b ON a.id = b.nonexistent_fk ORDER BY a.id LIMIT 10",
+                # 2. Subquery referencing wrong table
+                f"SELECT {col1} FROM {t_name} WHERE {col1} IN (SELECT {col1} FROM nonexistent_subtable) ORDER BY id LIMIT 10",
+                # 3. Wrong aggregation with missing GROUP BY
+                f"SELECT {col1}, COUNT(*) FROM {t_name} WHERE id > 0 ORDER BY id LIMIT 10",
+                # 4. Mixed-up column references across tables
+                f"SELECT {t2_col} FROM {t_name} WHERE {t2_col} IS NOT NULL ORDER BY id LIMIT 10",
+                # 5. HAVING without GROUP BY
+                f"SELECT {col1} FROM {t_name} HAVING COUNT(*) > 1 ORDER BY id LIMIT 10",
+                # 6. Ambiguous column in a self-referencing context
+                f"SELECT {col1}, {col2} FROM {t_name}, {t2_name} WHERE id > 0 ORDER BY id LIMIT 10",
+            ])
+            broken_query = mutation
+        
+        # Execute correct query to get expected output
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(correct_query)
         cols = [c[0] for c in cursor.description]
         expected_output = [dict(zip(cols, row)) for row in cursor.fetchall()]
         conn.close()
         
-        # Break the query randomly (e.g. MISSING FROM)
-        broken_query = f"SELECT {query_col} RETRIEVE_FROM {t_name} LIMIT 10"
-        
         return TaskInfo(
-            task_id="dynamic",
+            task_id=difficulty,
             broken_query=broken_query,
             schema_sql=schema_str,
             expected_output=expected_output,
