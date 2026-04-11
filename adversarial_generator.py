@@ -171,7 +171,7 @@ class GeneticAdversary:
         else:
             return 1.0 # Generator successfully defeated the agent!
 
-    def generate_seed_population(self) -> List[TaskInfo]:
+    def generate_seed_population(self) -> list[TaskInfo]:
         """Creates the initial population by dynamically generating schemas and valid baseline tasks."""
         population = []
         for _ in range(self.population_size):
