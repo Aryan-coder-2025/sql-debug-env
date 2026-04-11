@@ -29,9 +29,7 @@ async def reset_env(request: Request):
             session_id = body.get("session_id")
             use_dynamic = body.get("dynamic", False)
             seed = body.get("seed", None)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON body")
-        except Exception:
+        except (json.JSONDecodeError, Exception):
             task_id = "easy"
             session_id = None
             use_dynamic = False
@@ -73,8 +71,10 @@ async def step_env(request: Request):
         import json
         try:
             body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        except (json.JSONDecodeError, Exception):
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
         session_id = body.get("session_id")
         command = body.get("command", "").strip()
         sql = body.get("sql", "").strip()
