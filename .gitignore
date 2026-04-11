@@ -31,7 +31,7 @@ grader_output.txt
 milestone_output.txt
 *_output.txt
 
-# Debug/test scripts (internal use only)
+# Debug/test scripts (internal use only, root level only)
 debug_*.py
 stress_test.py
-test_*.py
+/test_*.py
