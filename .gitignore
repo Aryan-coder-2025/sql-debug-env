@@ -40,7 +40,7 @@ stress_test.py
 /test_*.py
 
 # Lock files & caches
-uv.lock
+
 .pytest_cache/
 
 # Streamlit secrets
