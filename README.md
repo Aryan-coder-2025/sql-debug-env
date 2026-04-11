@@ -113,23 +113,36 @@ pip install -r requirements.txt
 python main.py
 ```
 
+The server starts at `http://localhost:7860`. No API keys required.
+
 ### 2. View the Live Streamlit Dashboard
 
-In a new terminal to visualize the Hybrid Agent dynamically fixing queries:
+The dashboard requires an LLM API key for the agent (Groq is free). Copy `.env.example` to `.env` and add your key:
+
+```bash
+cp .env.example .env
+# Edit .env and add your GROQ_API_KEY (free at console.groq.com)
+```
+
+Then in a new terminal:
 ```bash
 pip install streamlit pandas plotly sqlglot openai faker
+export GROQ_API_KEY="your_key_here"       # Linux/Mac
+$env:GROQ_API_KEY="your_key_here"         # Windows PowerShell
 streamlit run dashboard.py
 ```
 
 #### 🖥️ Understanding the Dashboard UI
-Once the dashboard opens at `http://localhost:8501`, here is how to use it:
-1. **Start Debugging (Upload & Initialize)**: Clicking this generates a brand new randomized SQLite database and creates a synthetic "Buggy Query" for the agent to fix. The loading time is instantaneous.
-2. **Agent Internal Reasoning**: Shows the raw thoughts of the LLM before it executes a command.
-3. **Session History Log**: Shows the step-by-step history of commands the agent executed (e.g. `EXPLAIN SELECT...` or `DESCRIBE users`) and the exact feedback the environment returned.
-4. **Reward Accumulation**: Tracks the agent's reinforcement learning score. The agent gets `+0.1` for analyzing the db, `+1.0` for a correct fix, `-0.05` for syntax errors, and `+/- 0.1` for algorithmic query efficiency (penalized for Table Scans, rewarded for Indexes).
+The dashboard **auto-starts** when you open it — it generates a random buggy query and runs the AI agent to fix it automatically. Here's what you'll see:
+
+1. **Agent Internal Reasoning**: Shows the raw thoughts of the LLM before it executes a command.
+2. **Query Evolution**: Side-by-side diff of the original buggy query vs. the agent's proposed fix.
+3. **Session History Log**: Step-by-step history of commands the agent executed (e.g. `EXPLAIN SELECT...` or `DESCRIBE users`) and the exact feedback the environment returned.
+4. **Reward Accumulation**: Tracks the agent's RL score as a line chart. Rewards are fractional (0.05–0.95), composed of correctness (0.60), exploration bonus (up to 0.20), and efficiency bonus (up to 0.15).
 5. **Control Panel**:
-    - **Step Agent**: Forces the LLM Agent to take exactly *one* debugging action so you can watch its thought process manually.
-    - **Run to Fix**: The LLM Agent will repeatedly take steps automatically in a loop until it finds the correct answer and submits it.
+    - **Start Debugging**: Generates a new random session and auto-runs the agent.
+    - **Step Agent**: Forces the agent to take exactly *one* debugging action for manual inspection.
+    - **Run to Fix**: The agent takes steps automatically until it finds the correct answer.
 
 ### 3. Run the Genetic Adversarial Generator
 
@@ -145,33 +158,59 @@ python adversarial_generator.py
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `WS` | `/ws` | WebSocket (OpenEnv protocol) |
-| `POST` | `/mcp` | Model Context Protocol (JSON-RPC 2.0) |
+| `GET` | `/health` | Liveness check |
+| `GET` | `/` | Environment info & available endpoints |
+| `GET` | `/tasks` | List all tasks with schemas |
+| `GET` | `/validate` | Self-validation against OpenEnv spec |
 | `POST` | `/reset` | Start a new episode (`task_id`, `session_id`) |
 | `POST` | `/step` | Submit SQL action (`type`, `sql`, `reasoning`) |
-| `GET` | `/schema` | Action/Observation JSON schemas |
+| `GET` | `/state` | Current episode state |
+| `GET` | `/grader` | Episode grading score |
+| `GET` | `/baseline` | Run baseline agent on all tasks |
 | `GET` | `/metrics` | Live telemetry (sessions, success rate) |
 | `GET` | `/trajectories` | List trajectory replay files |
+| `POST` | `/mcp` | Model Context Protocol (JSON-RPC 2.0) |
+| `GET` | `/docs` | Interactive Swagger API documentation |
 
 ---
 
 ## 🎯 Task Generation
 
-We use two distinct methods to challenge the agents:
-1. **Static Task Registry**: 34 handmade scenarios across 3 distinct real-world databases spanning syntax, JOIN logic, subqueries, and strict Security (SQL injections).
+We use three distinct methods to challenge the agents:
+1. **Static Task Registry**: 34 handmade scenarios across 4 difficulty levels spanning syntax, JOIN logic, subqueries, and strict Security (SQL injections).
 2. **Dynamic Generation (`dynamic_schema.py`)**: Uses `Faker` to inject noisy schemas (NULLs, dirty strings in INT fields, duplicates).
-3. **Adversarial Muation (`adversarial_generator.py`)**: A Genetic Algorithm rips apart correct queries (dropping conditionals, breaking `ON` statements) explicitly optimizing to defeat the LLM agent.
+3. **Adversarial Mutation (`adversarial_generator.py`)**: A Genetic Algorithm rips apart correct queries (dropping conditionals, breaking `ON` statements) explicitly optimizing to defeat the LLM agent.
 
 ---
 
 ## 📊 Reward Structure
 
+### Core Environment Rewards (`environment.py`)
+
 | Action / Signal | Value | Description |
 |--------|-------|-------------|
-| Final Correct Query | +1.00 | Exact output state match |
-| Use `DESCRIBE <table>` | +0.20 | Positive reward for inspecting schemas involved |
-| Use `EXPLAIN <sql>` | +0.10 | Positive reward for investigating query plans |
-| SQL Execution Error | -0.05 | Query failed or was hallucinated |
-| Late steps | -1.00 | Penalty after hitting max steps (Timeout) |
+| Valid query result | +0.05 | Any non-error execution |
+| ≥ 50% correctness | +0.20 | Partial row match |
+| ≥ 90% correctness | +0.40 | Near-exact match |
+| 100% correctness | +0.20 | Exact output match |
+| SQL Execution Error | −0.05 | Query failed or was hallucinated |
+| Late steps (> step 5) | −0.05/step | Efficiency penalty |
+| Full Table Scan | −0.10 | Penalized via EXPLAIN QUERY PLAN |
+| Index Search | +0.10 | Rewarded via EXPLAIN QUERY PLAN |
+
+### Multi-Step Session Rewards (`multi_step_env.py`)
+
+| Action / Signal | Value | Description |
+|--------|-------|-------------|
+| `SHOW_TABLES` | +0.10 | Reward for inspecting available tables |
+| `DESCRIBE <table>` | +0.20 | Reward for inspecting table schema |
+| `EXPLAIN <sql>` | +0.10 | Reward for investigating query plans |
+| Correct `SUBMIT_QUERY` | 0.60 + bonuses | Base (0.60) + exploration (up to 0.20) + efficiency (up to 0.15) |
+| Incorrect `SUBMIT_QUERY` | Partial credit | `correctness × 0.4` |
+| `GIVE_UP` | −1.00 | Agent aborted the session |
+| Timeout (max steps) | −1.00 | Failed to fix within step limit |
+
+> **Rewards are always fractional** (clamped to 0.05–0.95), never exactly 0.0 or 1.0.
 
 ---
 
@@ -181,8 +220,10 @@ This environment fully integrates with the [OpenEnv](https://github.com/meta-pyt
 
 - ✅ `Environment` base class from `openenv-core`
 - ✅ `HTTPEnvServer` for WebSocket + MCP transport
-- ✅ Typed `Action`, `Observation`, `State` models
+- ✅ Typed `Action`, `Observation`, `State` Pydantic models
 - ✅ Concurrent session support (50 max)
+- ✅ Session isolation via `session_id`
+- ✅ Trajectory replay logging
 
 ---
 
@@ -190,27 +231,33 @@ This environment fully integrates with the [OpenEnv](https://github.com/meta-pyt
 
 ```text
 sql-debug-env/
-├── backend_core/
-│   ├── main.py                # FastAPI Server + REST + WS Endpoints
-│   ├── environment.py         # SQLDebugEnv (Environment base)
-│   ├── models.py              # OpenEnv Pydantic types
-│   ├── grader.py              # Evaluation (Correctness vs Efficiency)
-│   ├── openenv.yaml           # OpenEnv manifest
-│   └── client.py              # EnvClient SDK
-│
-├── frontend_ui/
-│   └── dashboard.py           # 📊 Live Streamlit Debugging UI
-│
-├── agent_intelligence/
-│   ├── hybrid_agent.py        # 🤖 LLM Policy + Symbolic Validator (sqlglot)
-│   ├── adversarial_generator.py # 👾 Genetic Mutator to craft difficult SQL bugs
-│   ├── multi_step_env.py      # 🔄 Gym wrapper tracking session history & sparse rewards
-│   └── dynamic_schema.py      # 🎲 Noisy Data / Schema Generator (Faker)
-│
+├── main.py                    # FastAPI Server + REST + WS + MCP Endpoints
+├── environment.py             # SQLDebugEnv (OpenEnv Environment subclass)
+├── models.py                  # Typed Pydantic models (Action, Observation, State)
+├── grader.py                  # Episode grading (Correctness + Efficiency)
+├── openenv.yaml               # OpenEnv manifest
+├── client.py                  # EnvClient SDK
+├── dashboard.py               # 📊 Live Streamlit Debugging UI (auto-run)
+├── hybrid_agent.py            # 🤖 LLM Policy + Symbolic Validator (sqlglot)
+├── adversarial_generator.py   # 👾 Genetic Mutator to craft difficult SQL bugs
+├── multi_step_env.py          # 🔄 Gym wrapper with session history & fractional rewards
+├── dynamic_schema.py          # 🎲 Noisy Data / Schema Generator (Faker)
+├── inference.py               # Inference utilities
+├── .env.example               # Required environment variables template
+├── Dockerfile                 # Container build for HF Spaces deployment
+├── requirements.txt           # Python dependencies
 ├── tasks/
-│   └── task_{level}.py        # Baseline static tasks (Easy, Med, Hard, Security)
+│   ├── task_easy.py           # 11 easy scenarios (syntax errors)
+│   ├── task_medium.py         # 9 medium scenarios (JOIN logic)
+│   ├── task_hard.py           # 9 hard scenarios (subqueries, optimization)
+│   └── task_security.py       # 5 security scenarios (SQL injection, data leaks)
+├── baseline/
+│   └── run_baseline.py        # Baseline agent benchmark runner
+├── server/
+│   ├── app.py                 # Server entry point
+│   └── api.py                 # API router
 └── outputs/
-    └── trajectories/          # Auto-saved chronological replay logs (JSON)
+    └── trajectories/          # Auto-saved episode replay logs (JSON)
 ```
 
 ---
