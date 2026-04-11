@@ -180,16 +180,38 @@ class MultiStepSQLEnv(gym.Env):
                     correctness = metadata.get("correctness", 0.0) if metadata else 0.0
                     
                     if correctness >= 1.0:
-                        reward += 1.0
+                        # --- Nuanced reward: never exactly 0.0 or 1.0 ---
+                        # Base correctness component (max 0.60)
+                        correctness_reward = 0.60
+                        
+                        # Exploration bonus (max 0.20): reward agents that investigated first
+                        exploration_actions = sum(
+                            1 for act, _, _ in self.history
+                            if act.strip().upper().startswith(("EXPLAIN", "DESCRIBE", "SHOW_TABLES"))
+                        )
+                        exploration_bonus = min(0.20, exploration_actions * 0.05)
+                        
+                        # Efficiency bonus (max 0.15): reward solving in fewer steps
+                        steps_used = self.current_step
+                        efficiency_bonus = max(0.0, (self.max_steps - steps_used) / self.max_steps) * 0.15
+                        
+                        # Final reward: fractional, clamped to [0.05, 0.95]
+                        reward += round(min(0.95, max(0.05, correctness_reward + exploration_bonus + efficiency_bonus)), 4)
                         done = True
-                        feedback = "Success! The query produces the correct result set."
+                        feedback = (f"Success! The query produces the correct result set. "
+                                    f"(Reward breakdown: correctness={correctness_reward}, "
+                                    f"exploration={round(exploration_bonus, 4)}, "
+                                    f"efficiency={round(efficiency_bonus, 4)})")
                     else:
                         if err:
                             feedback = f"SQL Error: {err}"
                             reward -= 0.05
                         else:
+                            # Partial credit for close attempts
+                            partial = round(correctness * 0.4, 4)
+                            reward += partial
                             feedback = ("Query executed successfully but results are incorrect. "
-                                        f"Correctness score: {correctness}")
+                                        f"Correctness score: {correctness}, partial reward: +{partial}")
                             
             elif command == "GIVE_UP":
                 feedback = "Session aborted by agent."

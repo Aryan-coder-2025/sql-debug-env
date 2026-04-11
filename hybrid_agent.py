@@ -52,9 +52,16 @@ class LLMPolicy:
     """
     def __init__(self, model_name="gpt-4o-mini", api_key=None):
         self.model_name = model_name
-        if "gpt" in model_name.lower():
-            if not OpenAI:
-                 raise ImportError("OpenAI SDK not installed. Run: pip install openai")
+        if not OpenAI:
+             raise ImportError("OpenAI SDK not installed. Run: pip install openai")
+             
+        if os.getenv("GROQ_API_KEY"):
+            # Use Groq via OpenAI client compatibility
+            if "gpt" in self.model_name.lower():
+                self.model_name = "llama-3.3-70b-versatile" # Map to a strong Groq model
+            resolved_key = api_key or os.getenv("GROQ_API_KEY")
+            self.client = OpenAI(api_key=resolved_key, base_url="https://api.groq.com/openai/v1")
+        elif "gpt" in model_name.lower():
             # Prevent Streamlit UI crash if key is missing locally by injecting a placeholder
             resolved_key = api_key or os.getenv("OPENAI_API_KEY") or "mock_key_to_prevent_ui_crash"
             self.client = OpenAI(api_key=resolved_key)
@@ -87,7 +94,7 @@ class LLMPolicy:
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
-                return "GIVE_UP\n-- Missing valid OPENAI_API_KEY. Add key to environment to enable LLM generation."
+                return f"GIVE_UP\n-- API Error or Missing valid API KEY. Add GROQ_API_KEY or OPENAI_API_KEY to environment. Error: {e}"
         else:
             # Fallback for unconnected local testing
             return "SHOW_TABLES"

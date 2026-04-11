@@ -21,6 +21,7 @@ Thumbs.db
 *.db-wal
 
 databases/*.db
+outputs/trajectories/
 
 baseline_scores.py
 
