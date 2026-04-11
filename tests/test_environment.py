@@ -94,7 +94,7 @@ class TestStepExecution:
 
     def test_correct_fix_gives_full_correctness(self):
         env = SQLDebugEnv()
-        env.reset(task_id="easy")
+        env.reset(task_id="easy", scenario="typo_from")
         obs = env.step(SQLAction(
             type="run_sql",
             sql="SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name"
