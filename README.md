@@ -13,6 +13,8 @@ An OpenEnv-compatible reinforcement learning environment for training AI agents 
 
 ![Live Demo](https://img.shields.io/badge/Live-Demo-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![FastAPI](https://img.shields.io/badge/FastAPI-0.135-green) ![OpenEnv](https://img.shields.io/badge/OpenEnv-0.2.3-purple) ![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B)
 
+📘 **[Read the Complete Project Documentation & Hackathon Strategy Strategy](sql_debug_env_documentation.md)**
+
 ---
 
 ## 🏗️ Architecture
