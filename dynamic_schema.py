@@ -171,6 +171,10 @@ class DynamicSQLEnv(SQLDebugEnv):
     A drop-in replacement for SQLDebugEnv that generates a random, messy schema
     for every new episode, instead of using static databases.
     """
+    def __init__(self, seed: int = None):
+        super().__init__()
+        self.seed = seed
+
     
     def _load_task(self, task_id: str, scenario: str = None) -> TaskInfo:
         """
@@ -180,8 +184,12 @@ class DynamicSQLEnv(SQLDebugEnv):
         Difficulty is randomly selected to produce a mix of easy (1-2 step), 
         medium (3-5 step), and hard (5-10 step) debugging sessions.
         """
+        # Set python's built-in random seed for reproducibility in mutation choices
+        if self.seed is not None:
+            random.seed(self.seed)
+
         # Generate new DB with at least 2 tables for JOIN-based bugs
-        db_path, schema_str, tables = generate_random_schema(num_tables=(2, 4))
+        db_path, schema_str, tables = generate_random_schema(seed=self.seed, num_tables=(2, 4))
         
         # Pick primary and secondary tables
         target_table = tables[0]

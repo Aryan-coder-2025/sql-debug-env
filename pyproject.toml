@@ -27,6 +27,8 @@ version = "1.0.0"
 
 [tool.pyright]
 pythonVersion = "3.12"
+venvPath = "."
+venv = "debugenv"
 extraPaths = ["."]
 executionEnvironments = [
     { root = ".", extraPaths = ["."] }

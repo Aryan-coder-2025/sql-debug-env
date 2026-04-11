@@ -34,6 +34,18 @@ from tasks.task_medium import MEDIUM_SCENARIOS
 from tasks.task_hard import HARD_SCENARIOS
 from tasks.task_security import SECURITY_SCENARIOS
 
+# Dynamic & adversarial modules (optional — degrade gracefully)
+try:
+    from dynamic_schema import DynamicSQLEnv, generate_random_schema
+    HAS_DYNAMIC = True
+except ImportError:
+    HAS_DYNAMIC = False
+try:
+    from adversarial_generator import SQLMutator, GeneticAdversary
+    HAS_ADVERSARIAL = True
+except ImportError:
+    HAS_ADVERSARIAL = False
+
 # =============================================================================
 # Create FastAPI app with OpenEnv server for WebSocket support
 # =============================================================================
@@ -156,6 +168,7 @@ def root():
             "tasks": "GET  /tasks",
             "grader": "GET  /grader",
             "baseline": "GET  /baseline",
+            "challenge": "POST /challenge",
             "validate": "GET  /validate",
             "metrics": "GET  /metrics",
             "trajectories": "GET  /trajectories",
@@ -269,15 +282,37 @@ async def reset_env(request: Request):
     - task_id: 'easy', 'medium', 'hard', or 'security' (default: 'easy')
     - session_id: optional session identifier for isolation
     - scenario: optional specific scenario name
+    - dynamic: if true, generate a random schema instead of using handcrafted scenarios
+    - seed: optional int seed for reproducible dynamic schemas
     """
     try:
         try:
             body = await request.json()
             task_id = body.get("task_id", "easy")
             session_id = body.get("session_id")
+            use_dynamic = body.get("dynamic", False)
+            seed = body.get("seed", None)
         except Exception:
             task_id = "easy"
             session_id = None
+            use_dynamic = False
+            seed = None
+
+        # --- Dynamic mode: generate random schema & bugs ---
+        if use_dynamic:
+            if not HAS_DYNAMIC:
+                raise HTTPException(status_code=501, detail="Dynamic schema module not available (missing faker)")
+            dynamic_env = DynamicSQLEnv(seed=seed)
+            obs = dynamic_env.reset(task_id=task_id)
+            # Store the dynamic env in session for subsequent /step calls
+            sid = session_id or "default"
+            sessions[sid] = dynamic_env
+            multi_sessions[sid] = MultiStepSQLEnv(dynamic_env)
+            multi_sessions[sid].reset(task_id=task_id)
+            result = obs.model_dump()
+            result["mode"] = "dynamic"
+            result["note"] = "This scenario was randomly generated. Use seed for reproducibility."
+            return result
 
         if task_id not in ["easy", "medium", "hard", "security"]:
             raise HTTPException(
@@ -564,6 +599,56 @@ def get_trajectory(episode_id: str):
     try:
         with open(filepath, "r") as f:
             return _json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/challenge")
+async def generate_adversarial_challenge(request: Request):
+    """Generate an adversarial challenge using the genetic mutator.
+
+    Creates a dynamically generated schema and applies an adversarial mutation
+    to the query. Returns the setup observation.
+
+    Accepts JSON body:
+    - session_id: optional session identifier for isolation
+    """
+    if not HAS_ADVERSARIAL or not HAS_DYNAMIC:
+        raise HTTPException(status_code=501, detail="Adversarial or dynamic modules not available")
+
+    try:
+        try:
+            body = await request.json()
+            session_id = body.get("session_id")
+        except Exception:
+            session_id = None
+
+        sid = session_id or "default"
+
+        # Generate a seed population of 1 to get a mutant task
+        # Using a dummy agent just for generation
+        from hybrid_agent import HybridAgent
+        from adversarial_generator import GeneticAdversary, AdversarialSQLEnv
+        dummy_agent = HybridAgent("mock", use_rl_finetune=False)
+        generator = GeneticAdversary(agent=dummy_agent, population_size=1)
+        mutant_tasks = generator.generate_seed_population()
+        mutant_task = mutant_tasks[0]
+
+        # Inject the mutant into an AdversarialSQLEnv
+        adv_env = AdversarialSQLEnv(malicious_task=mutant_task)
+        obs = adv_env.reset(task_id="adversarial_seed")
+
+        # Store in session state
+        sessions[sid] = adv_env
+        multi_sessions[sid] = MultiStepSQLEnv(adv_env)
+        multi_sessions[sid].reset(task_id="adversarial_seed")
+
+        result = obs.model_dump()
+        result["mode"] = "adversarial"
+        result["note"] = "This is an adversarially mutated query designed to trick debugging agents."
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -1,0 +1,15 @@
+{
+    "include": ["."],
+    "pythonVersion": "3.12",
+    "venvPath": ".",
+    "venv": "debugenv",
+    "extraPaths": ["."],
+    "executionEnvironments": [
+        {
+            "root": ".",
+            "extraPaths": ["."]
+        }
+    ],
+    "reportMissingImports": "warning",
+    "reportMissingModuleSource": "none"
+}

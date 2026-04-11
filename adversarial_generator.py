@@ -204,8 +204,7 @@ class GeneticAdversary:
                 db_path=db_path
             )
             
-            # Store the correct query as metadata so we can mutate it further later
-            task.metadata = {"correct_query": correct_query}
+            # Store the correct query if we needed it (not needed for mutation)
             population.append(task)
             
         return population
