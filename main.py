@@ -164,6 +164,17 @@ def root():
             "websocket": "WS   /ws",
             "docs": "GET  /docs",
         },
+        "multi_step_commands": {
+            "description": "POST /step supports interactive multi-step debugging via the 'command' field",
+            "commands": [
+                {"name": "SHOW_TABLES", "usage": '{"command": "SHOW_TABLES"}', "reward": "+0.10", "description": "List all tables in the database"},
+                {"name": "DESCRIBE <table>", "usage": '{"command": "DESCRIBE employees"}', "reward": "+0.20", "description": "Show column names and types for a table"},
+                {"name": "EXPLAIN <sql>", "usage": '{"command": "EXPLAIN SELECT * FROM employees"}', "reward": "+0.10", "description": "Show the query execution plan"},
+                {"name": "SUBMIT_QUERY <sql>", "usage": '{"command": "SUBMIT_QUERY SELECT name FROM employees"}', "reward": "0.05-0.95", "description": "Submit a fix attempt — fractional reward based on correctness + exploration + efficiency"},
+                {"name": "GIVE_UP", "usage": '{"command": "GIVE_UP"}', "reward": "-0.50", "description": "Abandon the session"},
+            ],
+            "note": "Legacy mode (type + sql fields) still works for backward compatibility",
+        },
         "tasks": ["easy", "medium", "hard", "security"],
         "hf_space": "https://aryan-coder-25-openenv.hf.space",
         "hackathon": "OpenEnv by Meta × Hugging Face × Scaler",
@@ -325,7 +336,10 @@ async def step_env(request: Request):
             else:
                 obs, reward, done, info = result
 
+            # Use tracked cumulative reward from multi-step session
             base_env = multi.base_env
+            cum_reward = round(multi.cumulative_reward, 4)
+
             return {
                 "observation": {
                     "task_id": base_env.current_task.task_id if base_env.current_task else None,
@@ -338,7 +352,7 @@ async def step_env(request: Request):
                 },
                 "reward": {
                     "step_reward": round(reward, 4),
-                    "cumulative_reward": round(reward, 4),
+                    "cumulative_reward": cum_reward,
                     "correctness": info.get("correctness", 0.0),
                     "performance": 0.0,
                 },
@@ -349,6 +363,24 @@ async def step_env(request: Request):
                     "mode": "multi_step",
                     "available_commands": ["SHOW_TABLES", "DESCRIBE <table>", "EXPLAIN <sql>", "SUBMIT_QUERY <sql>", "GIVE_UP"],
                 },
+            }
+
+        # ─── Handle empty command field (not falsy but present) ───
+        if "command" in body and not command:
+            return {
+                "observation": {
+                    "task_id": None,
+                    "broken_query": "",
+                    "db_schema": "",
+                    "query_result": None,
+                    "error_message": "Empty command. Use SHOW_TABLES, DESCRIBE <table>, EXPLAIN <sql>, SUBMIT_QUERY <sql>, or GIVE_UP.",
+                    "step_count": 0,
+                    "done": False,
+                },
+                "reward": {"step_reward": 0.0, "cumulative_reward": 0.0, "correctness": 0.0, "performance": 0.0},
+                "done": False,
+                "info": {"error": "empty_command", "mode": "multi_step",
+                         "available_commands": ["SHOW_TABLES", "DESCRIBE <table>", "EXPLAIN <sql>", "SUBMIT_QUERY <sql>", "GIVE_UP"]},
             }
 
         # ─── Mode 2: Legacy SQLAction format ───

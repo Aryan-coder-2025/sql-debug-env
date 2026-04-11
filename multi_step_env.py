@@ -49,6 +49,7 @@ class MultiStepSQLEnv(gym.Env):
         self.session_state = {}
         self.history = []
         self.current_step = 0
+        self.cumulative_reward = 0.0
         
         # Action space: string commands from the agent.
         self.action_space = spaces.Text(max_length=2000)
@@ -70,6 +71,7 @@ class MultiStepSQLEnv(gym.Env):
         
         self.current_step = 0
         self.history = []
+        self.cumulative_reward = 0.0
         self.session_state = {
             "session_id": getattr(self.base_env, "_episode_id", f"session_{time.time()}"),
             "buggy_query": getattr(task, "broken_query", ""),
@@ -215,7 +217,7 @@ class MultiStepSQLEnv(gym.Env):
                             
             elif command == "GIVE_UP":
                 feedback = "Session aborted by agent."
-                reward -= 1.0
+                reward -= 0.5
                 done = True
                 
             else:
@@ -244,6 +246,7 @@ class MultiStepSQLEnv(gym.Env):
         info["action"] = action_str
         info["reward"] = reward
         info["feedback"] = feedback
+        self.cumulative_reward = round(self.cumulative_reward + reward, 4)
 
         if MODERN_GYM:
             truncated = (self.current_step >= self.max_steps and not done)

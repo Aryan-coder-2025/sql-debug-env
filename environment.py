@@ -319,7 +319,17 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
 
         try:
             db_uri = f"file:{db_path}?mode=ro"
+            query_timeout_s = 5  # seconds
             with sqlite3.connect(db_uri, uri=True, timeout=5) as conn:
+                # Install a progress handler to enforce query timeout
+                # Checks every 1000 SQLite VM instructions (~negligible overhead)
+                def _timeout_handler():
+                    elapsed = time.perf_counter() - start
+                    if elapsed > query_timeout_s:
+                        return 1  # non-zero = abort
+                    return 0
+                conn.set_progress_handler(_timeout_handler, 1000)
+
                 cursor = conn.cursor()
                 cursor.execute(sql)
 
@@ -405,7 +415,7 @@ class SQLDebugEnv(OpenEnvEnvironment[SQLAction, SQLObservation, SQLState]):
         # Block dangerous starting keywords
         dangerous_starts = [
             "DROP", "DELETE", "TRUNCATE", "UPDATE", "INSERT",
-            "ALTER", "CREATE", "REPLACE", "ATTACH",
+            "ALTER", "CREATE", "REPLACE", "ATTACH", "DETACH", "PRAGMA",
         ]
         for word in dangerous_starts:
             if sql_clean.startswith(word):
