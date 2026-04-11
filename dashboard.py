@@ -239,7 +239,7 @@ if st.session_state.original_query:
             cumulative = pd.Series(st.session_state.reward_history).cumsum()
             df = pd.DataFrame({"Step": range(1, len(cumulative) + 1), "Cumulative Reward": cumulative})
             fig = px.line(df, x="Step", y="Cumulative Reward", markers=True)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("No rewards accumulated yet.")
 
@@ -247,7 +247,7 @@ if st.session_state.original_query:
         st.subheader("📜 Session History Log")
         if st.session_state.action_history:
             history_df = pd.DataFrame(st.session_state.action_history)[["Action", "Reward"]]
-            st.dataframe(history_df, use_container_width=True)
+            st.dataframe(history_df, width='stretch')
         else:
             st.write("No steps taken.")
             
