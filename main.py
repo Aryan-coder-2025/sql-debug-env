@@ -270,7 +270,15 @@ def validate():
 
 
 # =============================================================================
-# REST API Endpoints (backward-compatible)
+# REST API & Endpoints (modularized to routers)
+# =============================================================================
+
+from routers import core, advanced
+app.include_router(core.router)
+app.include_router(advanced.router)
+
+# =============================================================================
+# MCP Endpoint (backward compat)
 # =============================================================================
 
 

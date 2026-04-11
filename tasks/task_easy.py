@@ -101,18 +101,36 @@ def create_db():
             ON employees(department)
         """
         )
+        base_rows = [
+            ("Alice", 90000.0, "Engineering"),
+            ("Bob", 85000.0, "Engineering"),
+            ("Carol", 95000.0, "Engineering"),
+            ("Dave", 70000.0, "Marketing"),
+            ("Eve", 75000.0, "Marketing"),
+            ("Frank", 88000.0, "Engineering"),
+            ("Grace", 92000.0, "Engineering"),
+            ("Hank", None, "Engineering"),
+        ]
+        
+        # Add 500 deterministic filler rows
+        import random
+        random.seed(42)
+        depts = ["Engineering", "Marketing", "Sales", "HR", "Finance", "Legal"]
+        first_names = ["John", "Jane", "Alex", "Sam", "Chris", "Pat", "Taylor", "Jordan", "Casey", "Riley", "Morgan", "Quinn"]
+        last_names = ["Smith", "Doe", "Brown", "Wilson", "Lee", "Garcia", "Martinez", "Robinson", "Clark", "Rodriguez"]
+        
+        for i in range(500):
+            name = f"{random.choice(first_names)} {random.choice(last_names)}"
+            dept = random.choice(depts)
+            salary = round(random.uniform(40000.0, 150000.0), 2)
+            # 5% chance of NULL salary for realism
+            if random.random() < 0.05:
+                salary = None
+            base_rows.append((name, salary, dept))
+            
         conn.executemany(
             "INSERT INTO employees(name, salary, department) VALUES (?,?,?)",
-            [
-                ("Alice", 90000.0, "Engineering"),
-                ("Bob", 85000.0, "Engineering"),
-                ("Carol", 95000.0, "Engineering"),
-                ("Dave", 70000.0, "Marketing"),
-                ("Eve", 75000.0, "Marketing"),
-                ("Frank", 88000.0, "Engineering"),
-                ("Grace", 92000.0, "Engineering"),
-                ("Hank", None, "Engineering"),
-            ],
+            base_rows,
         )
         conn.commit()
         conn.close()

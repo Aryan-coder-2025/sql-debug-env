@@ -23,8 +23,8 @@ except ImportError:
 
 # Fallback in case we need to import models/env
 try:
-    from environment import SQLDebugEnv
-    from models import TaskInfo, SQLObservation, SQLAction
+    from environment import SQLDebugEnv  # type: ignore
+    from models import TaskInfo, SQLObservation, SQLAction  # type: ignore
 except ImportError:
     # Placholders if run isolated
     SQLDebugEnv = object
