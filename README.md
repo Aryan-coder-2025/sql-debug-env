@@ -135,7 +135,7 @@ streamlit run dashboard.py
 ```
 
 #### 🖥️ Understanding the Dashboard UI
-The dashboard **auto-starts** when you open it — it generates a random buggy query and runs the AI agent to fix it automatically. Here's what you'll see:
+The dashboard is highly optimized with Streamlit caching and session states. It **auto-starts** when you open it — generating a random buggy query and running the AI agent to fix it automatically. Here's what you'll see:
 
 1. **Agent Internal Reasoning**: Shows the raw thoughts of the LLM before it executes a command.
 2. **Query Evolution**: Side-by-side diff of the original buggy query vs. the agent's proposed fix.
